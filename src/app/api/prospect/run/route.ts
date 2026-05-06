@@ -6,7 +6,7 @@ import { beginCrmBatch, flushCrmBatch, upsertContact, upsertOrganization } from 
 import { fetchPage, findStaffLikeLinks, searchSerpApi } from "@/lib/prospect";
 import { createId, nowIso } from "@/lib/utils";
 import type { ProspectRunInput } from "@/lib/types";
-import { ensureSheetSchema, listContacts, saveContacts } from "@/lib/sheets";
+import { ensureSheetSchema, listContacts, listOrganizations, saveContacts } from "@/lib/sheets";
 
 const bodySchema = z.object({
   campaignName: z.string().min(1),
@@ -185,6 +185,14 @@ function stateCodeFromGeo(geo: string) {
   return m?.[1] ?? "";
 }
 
+function isLibraryMediaSpecialistTitle(value: string) {
+  return /\blibrary\s+media\s+specialist\b/i.test(value || "");
+}
+
+function isLibrarianTitle(value: string) {
+  return /\blibrarian\b/i.test(value || "");
+}
+
 export async function POST(req: Request) {
   try {
     beginCrmBatch();
@@ -193,6 +201,7 @@ export async function POST(req: Request) {
     const isOutOfTime = () => Date.now() - startedAt > SOFT_RUNTIME_MS;
     await ensureSheetSchema();
     const existingContacts = await listContacts();
+    const existingOrganizations = await listOrganizations();
     const knownEmails = new Set(existingContacts.map((c) => c.email.toLowerCase()).filter(Boolean));
     const existingByEmail = new Map(existingContacts.map((c) => [c.email.toLowerCase(), c]));
     let existingMutated = false;
@@ -233,6 +242,7 @@ export async function POST(req: Request) {
     let discoveredSchoolCount = 0;
     let schoolsWithoutContactCount = 0;
     let recoveredSchoolContactCount = 0;
+    let fallbackLibrarianSkippedCount = 0;
     const failedQueries: string[] = [];
     const executedQueries: string[] = [];
     const schoolsOnlyFilteredSamples: string[] = [];
@@ -260,6 +270,12 @@ export async function POST(req: Request) {
       { queries: number; serpResults: number; extracted: number; accepted: number; failedQueries: number }
     >();
     const orgIdsWithContacts = new Set(existingContacts.map((c) => c.orgId).filter(Boolean));
+    const orgHasLibraryMediaSpecialist = new Map<string, boolean>();
+    for (const c of existingContacts) {
+      if (c.orgId && isLibraryMediaSpecialistTitle(c.title)) {
+        orgHasLibraryMediaSpecialist.set(c.orgId, true);
+      }
+    }
     const schoolQuerySeeds = ["Library Media Specialist", "Librarian"];
     const selectedLevels = allowedLevels.filter(
       (l) => l === "middle" || l === "high" || l === "elementary" || l === "university",
@@ -267,6 +283,24 @@ export async function POST(req: Request) {
     const focusedLevels = schoolsOnly
       ? selectedLevels.filter((l) => l !== "university")
       : selectedLevels;
+    // Exact school queries (quoted school name) first.
+    for (const geo of input.geoTargets) {
+      const [geoCityRaw, geoStateRaw] = geo.split(",").map((v) => v.trim());
+      const geoCity = (geoCityRaw ?? "").toLowerCase();
+      const geoState = (geoStateRaw ?? "").toLowerCase();
+      const matchingSchools = existingOrganizations.filter((o) => {
+        if (o.libraryType !== "school") return false;
+        const cityMatch = (o.city || "").toLowerCase() === geoCity;
+        const stateMatch = !geoState || (o.state || "").toLowerCase() === geoState;
+        return cityMatch && stateMatch && !!o.name;
+      });
+      for (const school of matchingSchools) {
+        const levelLabel = levelLabelForQuery(school.schoolLevel || "unknown");
+        const levelPart = levelLabel ? `"${levelLabel}"` : "";
+        queryPlan.push({ geo, kw: `"${school.name}" "Library Media Specialist" ${levelPart}`.trim() });
+        queryPlan.push({ geo, kw: `"${school.name}" "Librarian" ${levelPart}`.trim() });
+      }
+    }
     // Round-robin by town first so each geo target gets coverage before deeper expansion.
     for (const level of focusedLevels) {
       const levelLabel = levelLabelForQuery(level);
@@ -511,6 +545,13 @@ export async function POST(req: Request) {
               roleFilteredCount += 1;
               continue;
             }
+            const orgAlreadyHasLms = orgHasLibraryMediaSpecialist.get(org.id) === true;
+            const titleIsLms = isLibraryMediaSpecialistTitle(found.title);
+            const titleIsLibrarian = isLibrarianTitle(found.title);
+            if (orgAlreadyHasLms && titleIsLibrarian && !titleIsLms) {
+              fallbackLibrarianSkippedCount += 1;
+              continue;
+            }
             if (!hasInclude || hasExclude) {
               includeExcludeFilteredCount += 1;
               continue;
@@ -540,6 +581,7 @@ export async function POST(req: Request) {
             if (row) {
               knownEmails.add(normalizedEmail);
               orgIdsWithContacts.add(org.id);
+              if (titleIsLms) orgHasLibraryMediaSpecialist.set(org.id, true);
               queuedForReviewCount += 1;
               perGeoStats.get(geo)!.accepted += 1;
               if (found.sourceKind === "ai") acceptedFromAi += 1;
@@ -603,6 +645,10 @@ export async function POST(req: Request) {
               if (found.confidence !== "high") continue;
               const { roleBucket, roleConfidence } = classifyRoleBucket(found.title, found.evidence);
               if (roleBucket === "non_library") continue;
+              const orgAlreadyHasLms = orgHasLibraryMediaSpecialist.get(org.id) === true;
+              const titleIsLms = isLibraryMediaSpecialistTitle(found.title);
+              const titleIsLibrarian = isLibrarianTitle(found.title);
+              if (orgAlreadyHasLms && titleIsLibrarian && !titleIsLms) continue;
               const schoolLevel = found.schoolLevel === "unknown"
                 ? inferSchoolLevel(`${item.title} ${item.snippet ?? ""} ${item.link} ${found.evidence}`)
                 : found.schoolLevel;
@@ -630,6 +676,7 @@ export async function POST(req: Request) {
               if (row) {
                 knownEmails.add(normalizedEmail);
                 orgIdsWithContacts.add(org.id);
+                if (titleIsLms) orgHasLibraryMediaSpecialist.set(org.id, true);
                 queuedForReviewCount += 1;
                 discoveredCount += 1;
                 recoveredSchoolContactCount += 1;
@@ -685,6 +732,7 @@ export async function POST(req: Request) {
         aiRejectedByConfidence,
         acceptedFromDeterministic,
         acceptedFromAi,
+        fallbackLibrarianSkippedCount,
         allowedLevels,
         schoolsOnlyFilteredSamples,
         serpRejectedSamples,
