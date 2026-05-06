@@ -260,13 +260,34 @@ export async function POST(req: Request) {
     }
     const input = parsed.data;
     if (input.mode === "national") {
-      const publicResult = await runNationalPublicSchoolImport(input);
-      const privateResult = await runNationalPrivateSchoolImport(input);
+      const includePublic = input.includePublic ?? true;
+      const includePrivate = input.includePrivate ?? true;
+      if (!includePublic && !includePrivate) {
+        return NextResponse.json({ error: "Enable at least one source (public or private)." }, { status: 400 });
+      }
+      const publicResult = includePublic
+        ? await runNationalPublicSchoolImport(input)
+        : {
+            schoolsCreatedOrUpdated: 0,
+            scannedResults: 0,
+            queryCount: 0,
+            failedQueries: [] as string[],
+            sampleSchools: [] as string[],
+          };
+      const privateResult = includePrivate
+        ? await runNationalPrivateSchoolImport(input)
+        : {
+            schoolsCreatedOrUpdated: 0,
+            scannedResults: 0,
+            queryCount: 0,
+            failedQueries: [] as string[],
+            sampleSchools: [] as string[],
+          };
       return NextResponse.json({
         ok: true,
         mode: "national",
-        provider: "nces-ccd-public+nces-pss-private",
-        includesPrivate: true,
+        provider: includePublic && includePrivate ? "nces-ccd-public-direct+nces-pss-private" : includePublic ? "nces-ccd-public-direct" : "nces-pss-private",
+        includesPrivate: includePrivate,
         schoolsCreatedOrUpdated:
           (publicResult.schoolsCreatedOrUpdated ?? 0) + (privateResult.schoolsCreatedOrUpdated ?? 0),
         scannedResults: (publicResult.scannedResults ?? 0) + (privateResult.scannedResults ?? 0),

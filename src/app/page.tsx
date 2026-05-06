@@ -224,6 +224,10 @@ export default function ProspectsPage() {
   }
 
   async function preloadSchools() {
+    if (!stateCode) {
+      setUiError("Select a state before preloading schools.");
+      return;
+    }
     setBusy("preload-schools");
     setUiError("");
     setUiNotice("");
@@ -233,11 +237,11 @@ export default function ProspectsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           mode: "national",
-          stateCodes: [],
+          stateCodes: [stateCode],
           geoTargets: prospectForm.geoTargets,
           includePublic: true,
-          includePrivate: true,
-          maxRecords: 200000,
+          includePrivate: false,
+          maxRecords: 75000,
         }),
       });
       const body = await parseJsonSafe(res);
