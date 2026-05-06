@@ -1,36 +1,58 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AuthorBridge Librarian CRM
 
-## Getting Started
+Vercel-hosted demo CRM for sourcing librarian contacts from SERP pages and sending outreach email.
 
-First, run the development server:
+## Stack
+
+- Next.js (App Router)
+- Google Sheets (source of truth)
+- SerpAPI (search results)
+- Resend (email delivery + webhooks)
+
+## Required Environment Variables (Vercel)
+
+- `ADMIN_EMAIL`
+- `ADMIN_PASSWORD_HASH` (sha256 hash of the admin password)
+- `GOOGLE_SERVICE_ACCOUNT_EMAIL`
+- `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`
+- `GOOGLE_SHEETS_SPREADSHEET_ID`
+- `SERPAPI_API_KEY`
+- `RESEND_API_KEY`
+- `RESEND_FROM_EMAIL`
+- `APP_BASE_URL`
+- `RESEND_WEBHOOK_SECRET`
+
+## Google Sheet Tabs
+
+App auto-creates these tabs if missing:
+
+- `Organizations`
+- `Contacts`
+- `Campaigns`
+- `EmailEvents`
+- `Suppressions`
+
+## Local Run
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Local app runs on `http://localhost:3011`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Test
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run test
+npm run lint
+```
 
-## Learn More
+## Deploy (Vercel)
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. Create a new Vercel project from this repo/folder.
+2. Add all environment variables.
+3. Share the spreadsheet with the service account email.
+4. Set Resend webhook URL to:
+   - `https://<your-domain>/api/webhooks/resend`
+   - include header `x-webhook-secret: <RESEND_WEBHOOK_SECRET>`
