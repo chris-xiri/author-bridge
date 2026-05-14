@@ -570,6 +570,11 @@ tbody tr:hover {
   border-color: #fca5a5;
 }
 
+.diag-rows {
+  display: grid;
+  gap: 12px;
+}
+
 @media (max-width: 860px) {
   .app-shell {
     grid-template-columns: 1fr;

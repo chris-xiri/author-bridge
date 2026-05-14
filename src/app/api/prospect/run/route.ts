@@ -210,10 +210,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
     }
     const input: ProspectRunInput = parsed.data;
-    const maxResultsPerQuery = (parsed.data as { maxResultsPerQuery?: number }).maxResultsPerQuery ?? DEFAULT_MAX_RESULTS_PER_QUERY;
-    const maxQueriesPerRun = Math.max(DEFAULT_MAX_QUERIES_PER_RUN, input.geoTargets.length * 2);
-    const strictGeo = Boolean((parsed.data as { strictGeo?: boolean }).strictGeo ?? true);
-    const schoolsOnly = Boolean((parsed.data as { schoolsOnly?: boolean }).schoolsOnly ?? true);
+    const maxResultsPerQuery = input.maxResultsPerQuery ?? DEFAULT_MAX_RESULTS_PER_QUERY;
+    const strictGeo = input.strictGeo ?? true;
+    const schoolsOnly = input.schoolsOnly ?? true;
+    const maxQueriesPerRun = schoolsOnly ? 1000 : Math.max(DEFAULT_MAX_QUERIES_PER_RUN, input.geoTargets.length * 2);
     const runId = createId("run");
     let discoveredCount = 0;
     let queuedForReviewCount = 0;
@@ -244,6 +244,7 @@ export async function POST(req: Request) {
     let recoveredSchoolContactCount = 0;
     let fallbackLibrarianSkippedCount = 0;
     const failedQueries: string[] = [];
+    const failedQueryDetails: Array<{ query: string; error: string }> = [];
     const executedQueries: string[] = [];
     const schoolsOnlyFilteredSamples: string[] = [];
     const serpRejectedSamples: string[] = [];
@@ -290,34 +291,53 @@ export async function POST(req: Request) {
       const geoState = (geoStateRaw ?? "").toLowerCase();
       const matchingSchools = existingOrganizations.filter((o) => {
         if (o.libraryType !== "school") return false;
-        const cityMatch = (o.city || "").toLowerCase() === geoCity;
-        const stateMatch = !geoState || (o.state || "").toLowerCase() === geoState;
-        return cityMatch && stateMatch && !!o.name;
+        
+        const oCity = (o.city || "").toLowerCase().trim();
+        const oCounty = (o.county || "").toLowerCase().trim();
+        const oState = (o.state || "").toLowerCase().trim();
+        
+        const stateMatch = !geoState || oState === geoState;
+        
+        let geoMatch = false;
+        if (geoCity.includes("county")) {
+            const strippedGeo = geoCity.replace("county", "").trim();
+            const strippedO = oCounty.replace("county", "").trim();
+            geoMatch = strippedGeo === strippedO;
+        } else {
+            geoMatch = oCity === geoCity || (!geoCity && true);
+        }
+        
+        return geoMatch && stateMatch && !!o.name;
       });
       for (const school of matchingSchools) {
+        if (!allowedLevels.includes(school.schoolLevel || "unknown") && school.schoolLevel !== "unknown") {
+            continue;
+        }
         const levelLabel = levelLabelForQuery(school.schoolLevel || "unknown");
         const levelPart = levelLabel ? `"${levelLabel}"` : "";
         queryPlan.push({ geo, kw: `"${school.name}" "Library Media Specialist" ${levelPart}`.trim() });
         queryPlan.push({ geo, kw: `"${school.name}" "Librarian" ${levelPart}`.trim() });
       }
     }
-    // Round-robin by town first so each geo target gets coverage before deeper expansion.
-    for (const level of focusedLevels) {
-      const levelLabel = levelLabelForQuery(level);
-      if (!levelLabel) continue;
-      for (const geo of input.geoTargets) {
-        const stateCode = stateCodeFromGeo(geo);
-        const k12DomainHint = stateCode ? `site:k12.${stateCode.toLowerCase()}.us` : "site:k12.us";
-        for (const seed of schoolQuerySeeds) {
-          queryPlan.push({ geo, kw: `${seed} ${levelLabel} -jobs -job -salary -indeed -ziprecruiter -glassdoor -olas` });
-          queryPlan.push({ geo, kw: `${seed} ${levelLabel} staff directory -jobs -job -salary -indeed -ziprecruiter -glassdoor -olas` });
-          queryPlan.push({ geo, kw: `${seed} ${levelLabel} ${k12DomainHint} -jobs -job -salary -indeed -ziprecruiter -glassdoor -olas` });
-          queryPlan.push({ geo, kw: `${seed} ${levelLabel} site:schools.org -jobs -job -salary -indeed -ziprecruiter -glassdoor -olas` });
+    if (!schoolsOnly) {
+      // Round-robin by town first so each geo target gets coverage before deeper expansion.
+      for (const level of focusedLevels) {
+        const levelLabel = levelLabelForQuery(level);
+        if (!levelLabel) continue;
+        for (const geo of input.geoTargets) {
+          const stateCode = stateCodeFromGeo(geo);
+          const k12DomainHint = stateCode ? `site:k12.${stateCode.toLowerCase()}.us` : "site:k12.us";
+          for (const seed of schoolQuerySeeds) {
+            queryPlan.push({ geo, kw: `${seed} ${levelLabel} -jobs -job -salary -indeed -ziprecruiter -glassdoor -olas` });
+            queryPlan.push({ geo, kw: `${seed} ${levelLabel} staff directory -jobs -job -salary -indeed -ziprecruiter -glassdoor -olas` });
+            queryPlan.push({ geo, kw: `${seed} ${levelLabel} ${k12DomainHint} -jobs -job -salary -indeed -ziprecruiter -glassdoor -olas` });
+            queryPlan.push({ geo, kw: `${seed} ${levelLabel} site:schools.org -jobs -job -salary -indeed -ziprecruiter -glassdoor -olas` });
+          }
         }
       }
-    }
-    for (const geo of input.geoTargets) {
-      for (const kw of keywords) queryPlan.push({ geo, kw });
+      for (const geo of input.geoTargets) {
+        for (const kw of keywords) queryPlan.push({ geo, kw });
+      }
     }
 
     for (const step of queryPlan) {
@@ -345,13 +365,17 @@ export async function POST(req: Request) {
       let results: Awaited<ReturnType<typeof searchSerpApi>> = [];
       try {
         results = await searchSerpApi(query, maxResultsPerQuery);
-      } catch {
+      } catch (error) {
         failedQueries.push(query);
+        failedQueryDetails.push({
+          query,
+          error: error instanceof Error ? error.message : "Unknown search error",
+        });
         perGeoStats.get(geo)!.failedQueries += 1;
         continue;
       }
       const candidates = [...results];
-      if (candidates.length < Math.max(2, maxResultsPerQuery)) {
+      if (candidates.length < Math.max(2, maxResultsPerQuery) && !schoolsOnly) {
         for (const fallbackQuery of fallbackQueries) {
           if (isOutOfTime()) {
             timedOut = true;
@@ -364,6 +388,7 @@ export async function POST(req: Request) {
             }
           } catch {
             failedQueries.push(fallbackQuery);
+            failedQueryDetails.push({ query: fallbackQuery, error: "Fallback query failed" });
             perGeoStats.get(geo)!.failedQueries += 1;
           }
         }
@@ -521,16 +546,16 @@ export async function POST(req: Request) {
                 continue;
               }
             }
-            if (found.confidence !== "high") {
+            const roleSignal = `${found.title} ${found.evidence}`.toLowerCase();
+            const hasStrongRoleSignal = /(librarian|library media specialist|school librarian|media specialist|library specialist|\blibrary\b)/.test(
+              roleSignal,
+            );
+            if (found.confidence !== "high" && !hasStrongRoleSignal) {
               confidenceFilteredCount += 1;
               continue;
             }
             const namePlausible = isNamePlausible(found.fullName);
             const nameAligned = isNameAlignedWithEmail(found.fullName, found.email);
-            const roleSignal = `${found.title} ${found.evidence}`.toLowerCase();
-            const hasStrongRoleSignal = /(librarian|library media specialist|school librarian|media specialist)/.test(
-              roleSignal,
-            );
             if (!namePlausible || (!nameAligned && !hasStrongRoleSignal)) {
               nameValidationFilteredCount += 1;
               continue;
@@ -539,6 +564,7 @@ export async function POST(req: Request) {
             const schoolLevel = found.schoolLevel === "unknown" ? inferSchoolLevel(srcForLevel) : found.schoolLevel;
             if (!allowedLevels.includes(schoolLevel)) {
               levelFilteredCount += 1;
+              continue;
             }
             const { roleBucket, roleConfidence } = classifyRoleBucket(found.title, found.evidence);
             if (roleBucket === "non_library") {
@@ -618,8 +644,12 @@ export async function POST(req: Request) {
         let schoolResults: Awaited<ReturnType<typeof searchSerpApi>> = [];
         try {
           schoolResults = await searchSerpApi(schoolQuery, 10);
-        } catch {
+        } catch (error) {
           failedQueries.push(schoolQuery);
+          failedQueryDetails.push({
+            query: schoolQuery,
+            error: error instanceof Error ? error.message : "School query failed",
+          });
           continue;
         }
         for (const item of schoolResults.slice(0, 4)) {
@@ -737,6 +767,7 @@ export async function POST(req: Request) {
         schoolsOnlyFilteredSamples,
         serpRejectedSamples,
         failedQueries,
+        failedQueryDetails: failedQueryDetails.slice(0, 120),
         executedQueries: executedQueries.slice(0, 120),
         perGeoStats: Array.from(perGeoStats.entries()).map(([geo, stats]) => ({ geo, ...stats })),
       },

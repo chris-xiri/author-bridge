@@ -762,7 +762,7 @@ export default function ProspectsPage() {
                     Schools only (filter)
                   </label>
                   <p style={{ margin: "0 0 8px 0", color: "#52698f", fontSize: 13 }}>
-                    Includes K-12/school district domains and excludes public-library style domains.
+                    Only searches for exact school names from your preloaded school list.
                   </p>
                 </>
               ) : (
@@ -787,12 +787,12 @@ export default function ProspectsPage() {
       {lastRunDebug ? (
         <section className="panel">
           <h2 className="section-title">Last Run Diagnostics</h2>
-          <div className="filters-bar">
+          <div className="diag-rows">
             <div className="filter-group">
-              <span className="filter-label">Schools-only filtered samples</span>
+              <span className="filter-label">1) Schools-only filtered samples</span>
               {Array.isArray(lastRunDebug.schoolsOnlyFilteredSamples) && lastRunDebug.schoolsOnlyFilteredSamples.length ? (
-                <ul style={{ maxWidth: 1100, margin: 0, paddingLeft: 18, fontSize: 13, color: "#445b7f", lineHeight: 1.5 }}>
-                  {(lastRunDebug.schoolsOnlyFilteredSamples as string[]).slice(0, 12).map((v, idx) => (
+                <ul style={{ maxWidth: 1200, margin: 0, paddingLeft: 18, fontSize: 13, color: "#445b7f", lineHeight: 1.5 }}>
+                  {(lastRunDebug.schoolsOnlyFilteredSamples as string[]).slice(0, 20).map((v, idx) => (
                     <li key={`schools-only-${idx}`}>{v}</li>
                   ))}
                 </ul>
@@ -801,10 +801,10 @@ export default function ProspectsPage() {
               )}
             </div>
             <div className="filter-group">
-              <span className="filter-label">SERP rejected samples</span>
+              <span className="filter-label">2) SERP rejected samples</span>
               {Array.isArray(lastRunDebug.serpRejectedSamples) && lastRunDebug.serpRejectedSamples.length ? (
-                <ul style={{ maxWidth: 1100, margin: 0, paddingLeft: 18, fontSize: 13, color: "#445b7f", lineHeight: 1.5 }}>
-                  {(lastRunDebug.serpRejectedSamples as string[]).slice(0, 12).map((v, idx) => (
+                <ul style={{ maxWidth: 1200, margin: 0, paddingLeft: 18, fontSize: 13, color: "#445b7f", lineHeight: 1.5 }}>
+                  {(lastRunDebug.serpRejectedSamples as string[]).slice(0, 20).map((v, idx) => (
                     <li key={`serp-rejected-${idx}`}>{v}</li>
                   ))}
                 </ul>
@@ -813,22 +813,28 @@ export default function ProspectsPage() {
               )}
             </div>
             <div className="filter-group">
-              <span className="filter-label">Failed queries</span>
-              {Array.isArray(lastRunDebug.failedQueries) && lastRunDebug.failedQueries.length ? (
-                <ul style={{ maxWidth: 1100, margin: 0, paddingLeft: 18, fontSize: 13, color: "#445b7f", lineHeight: 1.5 }}>
-                  {(lastRunDebug.failedQueries as string[]).slice(0, 12).map((v, idx) => (
-                    <li key={`failed-query-${idx}`}>{v}</li>
+              <span className="filter-label">3) Failed queries (with error reason)</span>
+              {Array.isArray(lastRunDebug.failedQueryDetails) && lastRunDebug.failedQueryDetails.length ? (
+                <ul style={{ maxWidth: 1300, margin: 0, paddingLeft: 18, fontSize: 13, color: "#445b7f", lineHeight: 1.5 }}>
+                  {(lastRunDebug.failedQueryDetails as Array<{ query: string; error: string }>).slice(0, 40).map((v, idx) => (
+                    <li key={`failed-query-${idx}`}><strong>{v.error}</strong>: {v.query}</li>
                   ))}
                 </ul>
               ) : (
-                <div style={{ maxWidth: 900, fontSize: 13, color: "#445b7f" }}>None</div>
+                Array.isArray(lastRunDebug.failedQueries) && lastRunDebug.failedQueries.length ? (
+                  <ul style={{ maxWidth: 1200, margin: 0, paddingLeft: 18, fontSize: 13, color: "#445b7f", lineHeight: 1.5 }}>
+                    {(lastRunDebug.failedQueries as string[]).slice(0, 20).map((v, idx) => (
+                      <li key={`failed-query-legacy-${idx}`}>{v}</li>
+                    ))}
+                  </ul>
+                ) : <div style={{ maxWidth: 900, fontSize: 13, color: "#445b7f" }}>None</div>
               )}
             </div>
             <div className="filter-group">
-              <span className="filter-label">Executed Google Queries</span>
+              <span className="filter-label">4) Executed Google Queries</span>
               {Array.isArray(lastRunDebug.executedQueries) && lastRunDebug.executedQueries.length ? (
-                <ul style={{ maxWidth: 1200, margin: 0, paddingLeft: 18, fontSize: 13, color: "#445b7f", lineHeight: 1.5 }}>
-                  {(lastRunDebug.executedQueries as string[]).slice(0, 60).map((v, idx) => (
+                <ul style={{ maxWidth: 1300, margin: 0, paddingLeft: 18, fontSize: 13, color: "#445b7f", lineHeight: 1.5 }}>
+                  {(lastRunDebug.executedQueries as string[]).slice(0, 80).map((v, idx) => (
                     <li key={`executed-query-${idx}`}>{v}</li>
                   ))}
                 </ul>
