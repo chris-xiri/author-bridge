@@ -21,9 +21,9 @@ const bodySchema = z.object({
 });
 
 const DEFAULT_MAX_RESULTS_PER_QUERY = 50;
-const DEFAULT_MAX_QUERIES_PER_RUN = 24;
+const DEFAULT_MAX_QUERIES_PER_RUN = 5000;
 const MAX_SERP_CANDIDATES_PER_QUERY = 8;
-const MAX_PAGE_FETCHES_PER_RUN = 45;
+const MAX_PAGE_FETCHES_PER_RUN = 300;
 
 function geoTokensFromTarget(geo: string) {
   return geo
@@ -197,7 +197,7 @@ export async function POST(req: Request) {
   try {
     beginCrmBatch();
     const startedAt = Date.now();
-    const SOFT_RUNTIME_MS = 62_000;
+    const SOFT_RUNTIME_MS = 165_000;
     const isOutOfTime = () => Date.now() - startedAt > SOFT_RUNTIME_MS;
     await ensureSheetSchema();
     const existingContacts = await listContacts();
@@ -213,7 +213,7 @@ export async function POST(req: Request) {
     const maxResultsPerQuery = input.maxResultsPerQuery ?? DEFAULT_MAX_RESULTS_PER_QUERY;
     const strictGeo = input.strictGeo ?? true;
     const schoolsOnly = input.schoolsOnly ?? true;
-    const maxQueriesPerRun = schoolsOnly ? 1000 : Math.max(DEFAULT_MAX_QUERIES_PER_RUN, input.geoTargets.length * 2);
+    const maxQueriesPerRun = Math.max(DEFAULT_MAX_QUERIES_PER_RUN, input.geoTargets.length * 20);
     const runId = createId("run");
     let discoveredCount = 0;
     let queuedForReviewCount = 0;
@@ -284,7 +284,8 @@ export async function POST(req: Request) {
     const focusedLevels = schoolsOnly
       ? selectedLevels.filter((l) => l !== "university")
       : selectedLevels;
-    // Exact school queries (quoted school name) first.
+    // Exact school queries (quoted school name) first, but distribute queries fairly across towns.
+    const perGeoExactQueries = new Map<string, Array<{ geo: string; kw: string }>>();
     for (const geo of input.geoTargets) {
       const [geoCityRaw, geoStateRaw] = geo.split(",").map((v) => v.trim());
       const geoCity = (geoCityRaw ?? "").toLowerCase();
@@ -311,12 +312,28 @@ export async function POST(req: Request) {
       });
       for (const school of matchingSchools) {
         if (!allowedLevels.includes(school.schoolLevel || "unknown") && school.schoolLevel !== "unknown") {
-            continue;
+          continue;
         }
         const levelLabel = levelLabelForQuery(school.schoolLevel || "unknown");
         const levelPart = levelLabel ? `"${levelLabel}"` : "";
-        queryPlan.push({ geo, kw: `"${school.name}" "Library Media Specialist" ${levelPart}`.trim() });
-        queryPlan.push({ geo, kw: `"${school.name}" "Librarian" ${levelPart}`.trim() });
+        const arr = perGeoExactQueries.get(geo) ?? [];
+        arr.push({ geo, kw: `"${school.name}" "Library Media Specialist" ${levelPart}`.trim() });
+        arr.push({ geo, kw: `"${school.name}" "Librarian" ${levelPart}`.trim() });
+        perGeoExactQueries.set(geo, arr);
+      }
+    }
+    let hasPendingExact = true;
+    while (hasPendingExact) {
+      hasPendingExact = false;
+      for (const geo of input.geoTargets) {
+        const arr = perGeoExactQueries.get(geo) ?? [];
+        if (!arr.length) continue;
+        const next = arr.shift();
+        if (next) {
+          queryPlan.push(next);
+          hasPendingExact = true;
+        }
+        perGeoExactQueries.set(geo, arr);
       }
     }
     if (!schoolsOnly) {
