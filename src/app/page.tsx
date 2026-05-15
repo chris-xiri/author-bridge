@@ -512,6 +512,22 @@ export default function ProspectsPage() {
     return "badge-pending_review";
   }
 
+  function openGmailDraft(contact: Contact) {
+    const template = campaigns.find((c) => c.status === "draft") ?? campaigns[0];
+    if (!template) {
+      setUiError("Create a template first.");
+      return;
+    }
+    const subject = (template.subject || "").replaceAll("{{fullName}}", contact.fullName || "there");
+    const body = (template.body || "").replaceAll("{{fullName}}", contact.fullName || "there");
+    const gmailUrl =
+      `https://mail.google.com/mail/?view=cm&fs=1` +
+      `&to=${encodeURIComponent(contact.email)}` +
+      `&su=${encodeURIComponent(subject)}` +
+      `&body=${encodeURIComponent(body)}`;
+    window.open(gmailUrl, "_blank", "noopener,noreferrer");
+  }
+
   function joinedPreview(values: string[], max = 4) {
     if (!values.length) return "None";
     if (values.length <= max) return values.join(", ");
@@ -959,6 +975,13 @@ export default function ProspectsPage() {
                   <td><span className={`badge ${lifecycleClass(c)}`}>{lifecycleLabel(c)}</span></td>
                   <td>
                     <div className="actions-inline table-actions">
+                      <button
+                        className="secondary-btn"
+                        title="Open Gmail Draft"
+                        onClick={() => openGmailDraft(c)}
+                      >
+                        Send
+                      </button>
                       <button
                         className="secondary-btn"
                         title="Move to Rejected"
