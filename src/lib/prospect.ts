@@ -15,29 +15,40 @@ export async function searchSerpApi(query: string, num = 10): Promise<SerpResult
   const { SERPAPI_API_KEY, SERPER_API_KEY } = getEnv();
 
   if (SERPER_API_KEY) {
-    const res = await fetch("https://google.serper.dev/search", {
-      method: "POST",
-      headers: {
-        "X-API-KEY": SERPER_API_KEY,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ q: query, num }),
-      cache: "no-store",
-    });
-    if (!res.ok) {
-      throw new Error(`Serper request failed: ${res.status}`);
+    const serperAttempts = [
+      { q: query, num: Math.min(Math.max(num, 1), 10) },
+      { q: query },
+    ];
+    let lastSerperError = "";
+    for (const payload of serperAttempts) {
+      const res = await fetch("https://google.serper.dev/search", {
+        method: "POST",
+        headers: {
+          "X-API-KEY": SERPER_API_KEY,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+        cache: "no-store",
+      });
+      if (res.ok) {
+        const data = (await res.json()) as SerpApiResponse;
+        const org = Array.isArray(data.organic)
+          ? data.organic
+          : Array.isArray(data.organic_results)
+            ? data.organic_results
+            : [];
+        return org.map((item) => ({
+          title: item.title ?? "",
+          link: item.link ?? "",
+          snippet: item.snippet ?? "",
+        }));
+      }
+      const errText = (await res.text().catch(() => "")).slice(0, 180);
+      lastSerperError = `Serper request failed: ${res.status}${errText ? ` (${errText})` : ""}`;
     }
-    const data = (await res.json()) as SerpApiResponse;
-    const org = Array.isArray(data.organic)
-      ? data.organic
-      : Array.isArray(data.organic_results)
-        ? data.organic_results
-        : [];
-    return org.map((item) => ({
-      title: item.title ?? "",
-      link: item.link ?? "",
-      snippet: item.snippet ?? "",
-    }));
+    if (!SERPAPI_API_KEY) {
+      throw new Error(lastSerperError || "Serper request failed");
+    }
   }
 
   if (!SERPAPI_API_KEY) {
