@@ -84,9 +84,13 @@ export default function ProspectsPage() {
   async function loadCampaigns() {
     const res = await fetch("/api/campaigns");
     const body = await parseJsonSafe(res);
-    if (!res.ok) return;
+    if (!res.ok) {
+      setUiError(body.error || "Templates API failed");
+      return [] as Campaign[];
+    }
     const list = ((body ?? []) as Campaign[]).filter((c) => c.status !== "archived");
     setCampaigns(list);
+    return list;
   }
 
   useEffect(() => {
@@ -512,8 +516,9 @@ export default function ProspectsPage() {
     return "badge-pending_review";
   }
 
-  function openGmailDraft(contact: Contact) {
-    const template = campaigns.find((c) => c.status === "draft") ?? campaigns[0];
+  async function openGmailDraft(contact: Contact) {
+    const available = campaigns.length ? campaigns : await loadCampaigns();
+    const template = available.find((c) => c.status === "draft") ?? available[0];
     if (!template) {
       setUiError("Create a template first.");
       return;
