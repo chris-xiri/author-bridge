@@ -810,6 +810,26 @@ export default function ProspectsPage() {
           <h2 className="section-title">Last Run Diagnostics</h2>
           <div className="diag-rows">
             <div className="filter-group">
+              <span className="filter-label">Funnel summary</span>
+              {lastRunDebug.funnel ? (
+                <ul style={{ maxWidth: 1300, margin: 0, paddingLeft: 18, fontSize: 13, color: "#445b7f", lineHeight: 1.5 }}>
+                  <li>Queries executed: {String((lastRunDebug.funnel as { queriesExecuted?: number }).queriesExecuted ?? 0)}</li>
+                  <li>SERP results returned: {String((lastRunDebug.funnel as { serpResults?: number }).serpResults ?? 0)}</li>
+                  <li>URLs visited: {String((lastRunDebug.funnel as { urlsVisited?: number }).urlsVisited ?? 0)}</li>
+                  <li>Candidate contacts extracted: {String((lastRunDebug.funnel as { candidateContacts?: number }).candidateContacts ?? 0)}</li>
+                  <li>Dropped duplicate email: {String((lastRunDebug.funnel as { dropped?: { duplicateEmail?: number } }).dropped?.duplicateEmail ?? 0)}</li>
+                  <li>Dropped missing email: {String((lastRunDebug.funnel as { dropped?: { missingEmail?: number } }).dropped?.missingEmail ?? 0)}</li>
+                  <li>Dropped role mismatch: {String((lastRunDebug.funnel as { dropped?: { role?: number } }).dropped?.role ?? 0)}</li>
+                  <li>Dropped confidence: {String((lastRunDebug.funnel as { dropped?: { confidence?: number } }).dropped?.confidence ?? 0)}</li>
+                  <li>Dropped schools-only filter: {String((lastRunDebug.funnel as { dropped?: { schoolsOnly?: number } }).dropped?.schoolsOnly ?? 0)}</li>
+                  <li>Dropped name/email validation: {String((lastRunDebug.funnel as { dropped?: { nameEmailValidation?: number } }).dropped?.nameEmailValidation ?? 0)}</li>
+                  <li>Queued final: {String((lastRunDebug.funnel as { queued?: number }).queued ?? 0)}</li>
+                </ul>
+              ) : (
+                <div style={{ maxWidth: 900, fontSize: 13, color: "#445b7f" }}>No funnel summary available.</div>
+              )}
+            </div>
+            <div className="filter-group">
               <span className="filter-label">1) Executed Google Queries</span>
               {Array.isArray(lastRunDebug.executedQueries) && lastRunDebug.executedQueries.length ? (
                 <ul style={{ maxWidth: 1300, margin: 0, paddingLeft: 18, fontSize: 13, color: "#445b7f", lineHeight: 1.5 }}>

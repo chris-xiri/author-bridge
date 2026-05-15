@@ -243,6 +243,8 @@ export async function POST(req: Request) {
     let schoolsWithoutContactCount = 0;
     let recoveredSchoolContactCount = 0;
     let fallbackLibrarianSkippedCount = 0;
+    let duplicateEmailSkippedCount = 0;
+    let missingEmailSkippedCount = 0;
     const failedQueries: string[] = [];
     const failedQueryDetails: Array<{ query: string; error: string }> = [];
     const executedQueries: string[] = [];
@@ -536,6 +538,7 @@ export async function POST(req: Request) {
           for (const found of extracted) {
             const normalizedEmail = (found.email ?? "").toLowerCase();
             if (!normalizedEmail) {
+              missingEmailSkippedCount += 1;
               continue;
             }
             const text = `${found.title} ${found.evidence}`.toLowerCase();
@@ -545,6 +548,7 @@ export async function POST(req: Request) {
               includeTerms.some((t) => text.includes(t) || searchContext.includes(t));
             const hasExclude = excludeTerms.some((t) => text.includes(t));
             if (knownEmails.has(normalizedEmail)) {
+              duplicateEmailSkippedCount += 1;
               if (hasExclude) {
                 const existing = existingByEmail.get(normalizedEmail);
                 if (existing && existing.status === "pending_review") {
@@ -658,6 +662,8 @@ export async function POST(req: Request) {
           timedOut = true;
           break;
         }
+        queryCount += 1;
+        executedQueries.push(schoolQuery);
         let schoolResults: Awaited<ReturnType<typeof searchSerpApi>> = [];
         try {
           schoolResults = await searchSerpApi(schoolQuery, 10);
@@ -686,7 +692,14 @@ export async function POST(req: Request) {
             if (!regexExtracted.length) continue;
             for (const found of regexExtracted) {
               const normalizedEmail = (found.email ?? "").toLowerCase();
-              if (!normalizedEmail || knownEmails.has(normalizedEmail)) continue;
+              if (!normalizedEmail) {
+                missingEmailSkippedCount += 1;
+                continue;
+              }
+              if (knownEmails.has(normalizedEmail)) {
+                duplicateEmailSkippedCount += 1;
+                continue;
+              }
               const domain = normalizedEmail.split("@")[1] ?? "";
               if (schoolsOnly && !isSchoolEmailDomain(domain)) continue;
               if (found.confidence !== "high") continue;
@@ -744,6 +757,25 @@ export async function POST(req: Request) {
       await saveContacts(existingContacts);
     }
     await flushCrmBatch();
+    const funnel = {
+      queriesExecuted: queryCount,
+      serpResults: resultCount,
+      urlsVisited: pageFetchCount,
+      candidateContacts: extractedCount,
+      dropped: {
+        duplicateEmail: duplicateEmailSkippedCount,
+        missingEmail: missingEmailSkippedCount,
+        level: levelFilteredCount,
+        role: roleFilteredCount,
+        confidence: confidenceFilteredCount,
+        includeExclude: includeExcludeFilteredCount,
+        schoolsOnly: schoolsOnlyFilteredCount,
+        nameEmailValidation: nameValidationFilteredCount,
+        serpRejected: serpRejectedCount,
+        fallbackLibrarianSkipped: fallbackLibrarianSkippedCount,
+      },
+      queued: queuedForReviewCount,
+    };
 
     return NextResponse.json({
       runId,
@@ -780,6 +812,9 @@ export async function POST(req: Request) {
         acceptedFromDeterministic,
         acceptedFromAi,
         fallbackLibrarianSkippedCount,
+        duplicateEmailSkippedCount,
+        missingEmailSkippedCount,
+        funnel,
         allowedLevels,
         schoolsOnlyFilteredSamples,
         serpRejectedSamples,
