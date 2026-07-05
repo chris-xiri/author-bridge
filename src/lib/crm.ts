@@ -84,16 +84,7 @@ export async function upsertOrganization(input: Partial<OrganizationRow>) {
       }
       organizationsCache = orgs;
     }
-    if (input.schoolLevel && (!existing.schoolLevel || existing.schoolLevel === "unknown")) {
-      existing.schoolLevel = input.schoolLevel;
-      existing.updatedAt = ts;
-      if (crmBatchMode) {
-        organizationsDirty = true;
-      } else {
-        await saveOrganizations(orgs);
-      }
-      organizationsCache = orgs;
-    }
+
     if (typeof input.address === "string" && input.address.trim()) existing.address = input.address.trim();
     if (typeof input.zip === "string" && input.zip.trim()) existing.zip = input.zip.trim();
     if (typeof input.county === "string" && input.county.trim()) existing.county = input.county.trim();
@@ -114,7 +105,6 @@ export async function upsertOrganization(input: Partial<OrganizationRow>) {
     id: createId("org"),
     name: input.name ?? "",
     libraryType: (input.libraryType as OrganizationRow["libraryType"]) ?? "other",
-    schoolLevel: input.schoolLevel ?? "unknown",
     address: input.address ?? "",
     city: input.city ?? "",
     state: input.state ?? "",
@@ -147,8 +137,7 @@ export async function upsertContact(input: Partial<ContactRow>) {
   const ts = nowIso();
   if (existing) {
     existing.updatedAt = ts;
-    if (input.evidence) existing.evidence = input.evidence;
-    if (typeof input.schoolName === "string" && input.schoolName.trim()) existing.schoolName = input.schoolName.trim();
+    if (typeof input.orgName === "string" && input.orgName.trim()) existing.orgName = input.orgName.trim();
     if (crmBatchMode) {
       contactsDirty = true;
     } else {
@@ -162,16 +151,11 @@ export async function upsertContact(input: Partial<ContactRow>) {
     orgId: input.orgId ?? "",
     fullName: input.fullName ?? "",
     title: input.title ?? "",
-    schoolName: input.schoolName ?? "",
-    roleBucket: input.roleBucket ?? "library_support",
-    roleConfidence: input.roleConfidence ?? "medium",
-    schoolLevel: input.schoolLevel ?? "unknown",
+    orgName: input.orgName ?? "",
     email,
     phone: input.phone ?? "",
-    confidence: input.confidence ?? "medium",
     sourceQuery: input.sourceQuery ?? "",
     sourceUrl: input.sourceUrl ?? "",
-    evidence: input.evidence ?? "",
     status: "pending_review",
     outreachStatus: "none",
     unsubscribe: "false",

@@ -6,14 +6,10 @@ import { AppShell } from "@/components/app-shell";
 
 type Contact = {
   id: string;
-  schoolName?: string;
+  orgName: string;
   fullName: string;
   title: string;
-  roleBucket?: "librarian_core" | "library_support" | "non_library";
-  roleConfidence?: "high" | "medium";
-  schoolLevel?: string;
   email: string;
-  confidence: string;
   status: string;
   outreachStatus: string;
   sourceUrl: string;
@@ -39,7 +35,7 @@ export default function ProspectsPage() {
   const [statusFilter, setStatusFilter] = useState<string>("pending_review");
   const [rejectedOpen, setRejectedOpen] = useState(false);
   const [approvedGrouped, setApprovedGrouped] = useState(true);
-  const [editing, setEditing] = useState<{ id: string; field: "fullName" | "title" | "schoolName" | "schoolLevel" | "email" } | null>(null);
+  const [editing, setEditing] = useState<{ id: string; field: "fullName" | "title" | "orgName" | "email" } | null>(null);
   const [editValue, setEditValue] = useState("");
   const [stateCode, setStateCode] = useState("");
   const [countyName, setCountyName] = useState("");
@@ -48,17 +44,10 @@ export default function ProspectsPage() {
     campaignName: "May Librarian Outreach",
     maxResultsPerQuery: 50,
     geoTargets: [] as string[],
-    keywords: ["school librarian", "library media specialist"],
-    strictGeo: true,
-    schoolsOnly: true,
-    includeTerms: ["librarian", "library media specialist"],
-    excludeTerms: ["principal", "assistant principal", "dean", "superintendent"],
-    schoolLevels: ["elementary", "middle", "high", "university"] as string[],
+    prospectPublicLibraries: true,
+    prospectSchoolLibraries: true,
   });
   const [newGeo, setNewGeo] = useState("");
-  const [newKeyword, setNewKeyword] = useState("");
-  const [newIncludeTerm, setNewIncludeTerm] = useState("");
-  const [newExcludeTerm, setNewExcludeTerm] = useState("");
 
   async function parseJsonSafe(res: Response) {
     const text = await res.text();
@@ -107,11 +96,8 @@ export default function ProspectsPage() {
           ...prev,
           ...parsed,
           geoTargets: Array.isArray(parsed.geoTargets) ? parsed.geoTargets : prev.geoTargets,
-          keywords: Array.isArray(parsed.keywords) ? parsed.keywords : prev.keywords,
-          includeTerms: Array.isArray(parsed.includeTerms) ? parsed.includeTerms : prev.includeTerms,
-          excludeTerms: Array.isArray(parsed.excludeTerms) ? parsed.excludeTerms : prev.excludeTerms,
-          schoolLevels: Array.isArray(parsed.schoolLevels) ? parsed.schoolLevels : prev.schoolLevels,
-          schoolsOnly: typeof parsed.schoolsOnly === "boolean" ? parsed.schoolsOnly : prev.schoolsOnly,
+          prospectPublicLibraries: typeof parsed.prospectPublicLibraries === "boolean" ? parsed.prospectPublicLibraries : prev.prospectPublicLibraries,
+          prospectSchoolLibraries: typeof parsed.prospectSchoolLibraries === "boolean" ? parsed.prospectSchoolLibraries : prev.prospectSchoolLibraries,
           maxResultsPerQuery:
             typeof parsed.maxResultsPerQuery === "number" && Number.isFinite(parsed.maxResultsPerQuery)
               ? parsed.maxResultsPerQuery
@@ -155,69 +141,77 @@ export default function ProspectsPage() {
     setBusy("prospect");
     setUiError("");
     setUiNotice(`Running prospecting across ${prospectForm.geoTargets.length} geo targets...`);
-    setProgressPct(12);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 180000);
+    setProgressPct(5);
+
     try {
       const res = await fetch("/api/prospect/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        signal: controller.signal,
         body: JSON.stringify({
           campaignName: prospectForm.campaignName,
           geoTargets: prospectForm.geoTargets,
-          keywords: prospectForm.keywords,
           maxResultsPerQuery: prospectForm.maxResultsPerQuery,
-          strictGeo: prospectForm.strictGeo,
-          schoolsOnly: prospectForm.schoolsOnly,
-          includeTerms: prospectForm.includeTerms,
-          excludeTerms: prospectForm.excludeTerms,
-          schoolLevels: prospectForm.schoolLevels,
+          prospectPublicLibraries: prospectForm.prospectPublicLibraries,
+          prospectSchoolLibraries: prospectForm.prospectSchoolLibraries,
         }),
       });
-      const body = await parseJsonSafe(res);
+
       if (!res.ok) {
-        setUiError(body.error || "Run prospecting failed");
+        const text = await res.text();
+        let err = text;
+        try { err = JSON.parse(text).error; } catch {}
+        setUiError(err || "Run prospecting failed");
         setProgressPct(0);
         setBusy("");
         return;
       }
-      setProgressPct(100);
-      const debug = body?.debug ?? {};
-      setLastRunDebug(debug);
-      const perGeo = Array.isArray(debug.perGeoStats) ? (debug.perGeoStats as Array<{ geo: string; accepted: number }>) : [];
-      const geosWithContacts = perGeo.filter((g) => (g.accepted ?? 0) > 0).length;
-      const blockers = [
-        debug.levelFilteredCount ? `level filtered ${debug.levelFilteredCount}` : "",
-        debug.roleFilteredCount ? `role filtered ${debug.roleFilteredCount}` : "",
-        debug.confidenceFilteredCount ? `confidence filtered ${debug.confidenceFilteredCount}` : "",
-        debug.schoolsOnlyFilteredCount ? `schools-only filtered ${debug.schoolsOnlyFilteredCount}` : "",
-        debug.includeExcludeFilteredCount ? `include/exclude filtered ${debug.includeExcludeFilteredCount}` : "",
-        debug.nameValidationFilteredCount ? `name/email filtered ${debug.nameValidationFilteredCount}` : "",
-        debug.serpRejectedCount ? `SERP rejected ${debug.serpRejectedCount}` : "",
-      ].filter(Boolean).join(", ");
-      setUiNotice(
-        `Prospecting complete. Discovered ${body.discoveredCount ?? 0}, queued ${body.queuedForReviewCount ?? 0}${
-          body?.debug?.aiExtractedCount !== undefined ? `, AI extracted ${body.debug.aiExtractedCount}` : ""
-        }. Coverage: ${geosWithContacts}/${prospectForm.geoTargets.length} towns produced contacts${
-          (body.discoveredCount ?? 0) === 0 && blockers ? `. Filters: ${blockers}.` : "."
-        }`,
-      );
+
+      if (!res.body) throw new Error("No response body");
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() ?? "";
+        
+        for (const line of lines) {
+          const eventMatch = line.match(/event:\s*(.*)/);
+          const dataMatch = line.match(/data:\s*(.*)/);
+          if (eventMatch && dataMatch) {
+            const event = eventMatch[1].trim();
+            const data = JSON.parse(dataMatch[1].trim());
+            
+            if (event === "progress") {
+              if (data.message) setUiNotice(data.message);
+              if (data.pct) setProgressPct(data.pct);
+            } else if (event === "done") {
+              setProgressPct(100);
+              const debug = data.debug ?? {};
+              setLastRunDebug(debug);
+              const perGeo = Array.isArray(debug.perGeoStats) ? (debug.perGeoStats as Array<{ geo: string; accepted: number }>) : [];
+              const geosWithContacts = perGeo.filter((g) => (g.accepted ?? 0) > 0).length;
+              setUiNotice(`Prospecting complete. Discovered ${data.discoveredCount ?? 0}, queued ${data.queuedForReviewCount ?? 0}. Coverage: ${geosWithContacts}/${prospectForm.geoTargets.length} towns produced contacts.`);
+            } else if (event === "error") {
+              throw new Error(data.error || "Stream error");
+            }
+          }
+        }
+      }
+      
       setBusy("");
       await loadContacts();
     } catch (error) {
-      setUiError(
-        error instanceof Error && error.name === "AbortError"
-          ? "Prospecting timed out after 180s. Try a smaller geo scope (county/town) and rerun."
-          : error instanceof Error
-            ? error.message
-            : "Unexpected prospecting error",
-      );
+      setUiError(error instanceof Error ? error.message : "Unexpected prospecting error");
       setProgressPct(0);
       setBusy("");
       setLastRunDebug(null);
     } finally {
-      clearTimeout(timeout);
       setTimeout(() => setProgressPct(0), 1000);
     }
   }
@@ -274,7 +268,7 @@ export default function ProspectsPage() {
     await loadContacts();
   }
 
-  async function updateContactField(id: string, field: "fullName" | "title" | "schoolName" | "schoolLevel" | "email", value: string) {
+  async function updateContactField(id: string, field: "fullName" | "title" | "orgName" | "email", value: string) {
     const res = await fetch(`/api/contacts/${id}/update`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -287,7 +281,7 @@ export default function ProspectsPage() {
     await loadContacts();
   }
 
-  function beginInlineEdit(contact: Contact, field: "fullName" | "title" | "schoolName" | "schoolLevel" | "email") {
+  function beginInlineEdit(contact: Contact, field: "fullName" | "title" | "orgName" | "email") {
     setEditing({ id: contact.id, field });
     const current = field === "schoolLevel" ? schoolLevelLabel(contact.schoolLevel) : (contact[field] || "");
     setEditValue((current || "").toString());
@@ -302,7 +296,7 @@ export default function ProspectsPage() {
     return "unknown";
   }
 
-  async function commitInlineEdit(contact: Contact, field: "fullName" | "title" | "schoolName" | "schoolLevel" | "email") {
+  async function commitInlineEdit(contact: Contact, field: "fullName" | "title" | "orgName" | "email") {
     const trimmed = editValue.trim();
     setEditing(null);
     try {
@@ -321,7 +315,7 @@ export default function ProspectsPage() {
     }
   }
 
-  function renderEditableCell(contact: Contact, field: "fullName" | "title" | "schoolName" | "schoolLevel" | "email", fallback = "—") {
+  function renderEditableCell(contact: Contact, field: "fullName" | "title" | "orgName" | "email", fallback = "—") {
     const isEditing = editing?.id === contact.id && editing.field === field;
     if (isEditing) {
       return (
@@ -472,11 +466,7 @@ export default function ProspectsPage() {
     setManualCounty("");
   }
 
-  useEffect(() => {
-    if (busy !== "prospect") return;
-    const timer = setInterval(() => setProgressPct((prev) => (prev >= 92 ? prev : prev + 4)), 700);
-    return () => clearInterval(timer);
-  }, [busy]);
+
 
   const filteredContacts = contacts.filter((c) =>
     (levelFilter === "all" ? true : (c.schoolLevel ?? "unknown") === levelFilter) &&
@@ -493,7 +483,7 @@ export default function ProspectsPage() {
   const rejectedContacts = decidedContacts.filter((c) => c.status === "rejected");
   const approvedBySchool = Array.from(
     approvedContacts.reduce((acc, c) => {
-      const key = (c.schoolName || "Unknown School").trim();
+      const key = (c.orgName || "Unknown School").trim();
       const bucket = acc.get(key) ?? [];
       bucket.push(c);
       acc.set(key, bucket);
@@ -671,135 +661,24 @@ export default function ProspectsPage() {
         {prospectorOpen ? (
           <form onSubmit={runProspect} className="grid settings-grid">
             <div className="settings-group">
-              <h3 className="settings-title">Execution</h3>
-              <label>Campaign Name</label>
-              <input value={prospectForm.campaignName} onChange={(e) => setProspectForm({ ...prospectForm, campaignName: e.target.value })} />
-              <label>Results</label>
-              <input
-                aria-label="Results"
-                type="number"
-                min={5}
-                max={100}
-                value={prospectForm.maxResultsPerQuery}
-                onChange={(e) =>
-                  setProspectForm({
-                    ...prospectForm,
-                    maxResultsPerQuery: Number.isFinite(Number(e.target.value))
-                      ? Math.max(5, Math.min(100, Number(e.target.value)))
-                      : 50,
-                  })
-                }
-              />
-              <label>
-                <input
-                  type="checkbox"
-                  checked={prospectForm.strictGeo}
-                  onChange={(e) => setProspectForm({ ...prospectForm, strictGeo: e.target.checked })}
-                  style={{ marginRight: 8 }}
-                />
-                Strict local geo match
-              </label>
-              <p style={{ margin: "0 0 8px 0", color: "#52698f", fontSize: 13 }}>
-                Keeps results tightly tied to selected towns/county (reduces out-of-area pages, but may miss some edge cases).
-              </p>
-            </div>
-            <div className="settings-group">
-              <h3 className="settings-title">Geo Targets</h3>
-              <div className="geo-builder">
-                <div className="actions-inline">
-                  <label>State</label>
-                  <select
-                    value={stateCode}
-                    onChange={(e) => {
-                      const next = e.target.value;
-                      setStateCode(next);
-                      setCountyName("");
-                    }}
-                  >
-                    <option value="">Select state</option>
-                    {stateOptions.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                  <label>County</label>
-                  <select value={countyName} onChange={(e) => setCountyName(e.target.value)}>
-                    <option value="">Select county</option>
-                    {countyOptions.map((c) => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                  <button type="button" onClick={() => void addCountyTowns()} disabled={!countyName || busy === "county-towns"}>
-                    {busy === "county-towns" ? "Loading towns..." : "Add All County Towns"}
-                  </button>
-                </div>
-                <div className="actions-inline" style={{ marginTop: 8 }}>
-                  <label>Manual county</label>
+              <h3 className="settings-title">Target Libraries</h3>
+              <div style={{ display: "flex", gap: "1rem" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                   <input
-                    value={manualCounty}
-                    onChange={(e) => setManualCounty(e.target.value)}
-                    placeholder="e.g. Maricopa"
+                    type="checkbox"
+                    checked={prospectForm.prospectPublicLibraries}
+                    onChange={(e) => setProspectForm({ ...prospectForm, prospectPublicLibraries: e.target.checked })}
                   />
-                  <button type="button" onClick={addManualCountyTarget} disabled={!stateCode || !manualCounty.trim()}>
-                    Add County Target
-                  </button>
-                </div>
-              </div>
-              <div className="badge-input-wrap">
-                {prospectForm.geoTargets.map((v) => <span key={v} className="chip chip-geo" onClick={() => removeBadge("geoTargets", v)}>{v} ×</span>)}
-                <input value={newGeo} onChange={(e) => setNewGeo(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addBadge("geoTargets", newGeo, setNewGeo); } }} placeholder="Add geo target(s): comma/newline + Enter" />
-              </div>
-            </div>
-            <div className="settings-group">
-              <div className="header-row">
-                <h3 className="settings-title">Advanced targeting</h3>
-                <button
-                  type="button"
-                  className="secondary-btn"
-                  onClick={() => setAdvancedTargetingOpen((v) => !v)}
-                >
-                  {advancedTargetingOpen ? "Hide" : "Show"}
-                </button>
-              </div>
-              {advancedTargetingOpen ? (
-                <>
-                  <label>Keywords</label>
-                  <div className="badge-input-wrap">
-                    {prospectForm.keywords.map((v) => <span key={v} className="chip chip-keyword" onClick={() => removeBadge("keywords", v)}>{v} ×</span>)}
-                    <input value={newKeyword} onChange={(e) => setNewKeyword(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addBadge("keywords", newKeyword, setNewKeyword); } }} placeholder="Add keyword(s): comma/newline + Enter" />
-                  </div>
-                  <label>Include terms</label>
-                  <div className="badge-input-wrap">
-                    {prospectForm.includeTerms.map((v) => <span key={v} className="chip chip-include" onClick={() => removeBadge("includeTerms", v)}>{v} ×</span>)}
-                    <input value={newIncludeTerm} onChange={(e) => setNewIncludeTerm(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addBadge("includeTerms", newIncludeTerm, setNewIncludeTerm); } }} placeholder="Add include term(s): comma/newline + Enter" />
-                  </div>
-                  <label>Exclude terms</label>
-                  <div className="badge-input-wrap">
-                    {prospectForm.excludeTerms.map((v) => <span key={v} className="chip chip-exclude" onClick={() => removeBadge("excludeTerms", v)}>{v} ×</span>)}
-                    <input value={newExcludeTerm} onChange={(e) => setNewExcludeTerm(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addBadge("excludeTerms", newExcludeTerm, setNewExcludeTerm); } }} placeholder="Add exclude term(s): comma/newline + Enter" />
-                  </div>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={prospectForm.schoolsOnly}
-                      onChange={(e) => setProspectForm({ ...prospectForm, schoolsOnly: e.target.checked })}
-                      style={{ marginRight: 8 }}
-                    />
-                    Schools only (filter)
-                  </label>
-                  <p style={{ margin: "0 0 8px 0", color: "#52698f", fontSize: 13 }}>
-                    Only searches for exact school names from your preloaded school list.
-                  </p>
-                </>
-              ) : (
-                <p style={{ margin: 0, color: "#52698f" }}>
-                  Keywords and include/exclude terms are set to recommended defaults.
-                </p>
-              )}
-            </div>
-            <div className="settings-group">
-              <h3 className="settings-title">School levels</h3>
-              <div className="actions-inline level-toggles">
-                {["elementary", "middle", "high", "university"].map((level) => (
-                  <button key={level} type="button" className={prospectForm.schoolLevels.includes(level) ? "toggle-on" : "toggle-off"} onClick={() => toggleLevel(level)}>
-                    {prospectForm.schoolLevels.includes(level) ? "✓ " : ""}{level}
-                  </button>
-                ))}
+                  Public Libraries
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                  <input
+                    type="checkbox"
+                    checked={prospectForm.prospectSchoolLibraries}
+                    onChange={(e) => setProspectForm({ ...prospectForm, prospectSchoolLibraries: e.target.checked })}
+                  />
+                  School Libraries
+                </label>
               </div>
             </div>
           </form>
@@ -891,30 +770,6 @@ export default function ProspectsPage() {
         <h2 className="section-title">Review Queue</h2>
         <div className="filters-bar">
           <div className="filter-group">
-            <span className="filter-label">School level</span>
-            <div className="filter-chips">
-              {["all", "elementary", "middle", "high", "university", "unknown"].map((lvl) => (
-                <button
-                  key={lvl}
-                  type="button"
-                  className={levelFilter === lvl ? "filter-chip active" : "filter-chip"}
-                  onClick={() => setLevelFilter(lvl)}
-                >
-                  {lvl}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="filter-group">
-            <span className="filter-label">Role</span>
-            <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
-              <option value="all">all roles</option>
-              <option value="librarian_core">librarian core</option>
-              <option value="library_support">library support</option>
-              <option value="non_library">non library</option>
-            </select>
-          </div>
-          <div className="filter-group">
             <span className="filter-label">Status</span>
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
               <option value="pending_review">pending review</option>
@@ -927,8 +782,7 @@ export default function ProspectsPage() {
             type="button"
             className="secondary-btn"
             onClick={() => {
-              setLevelFilter("all");
-              setRoleFilter("all");
+              
               setStatusFilter("pending_review");
             }}
           >
@@ -942,12 +796,12 @@ export default function ProspectsPage() {
         </div>
         <div className="table-wrap">
           <table>
-            <thead><tr><th></th><th>Name</th><th>Title</th><th>School Name</th><th>School Level</th><th>Email</th><th>Lifecycle</th><th>Actions</th></tr></thead>
+            <thead><tr><th></th><th>Name</th><th>Title</th><th>Organization</th><th>Email</th><th>Lifecycle</th><th>Actions</th></tr></thead>
             <tbody>
               {pendingContacts.map((c) => (
                 <tr key={c.id}>
                   <td><input type="checkbox" checked={selected.has(c.id)} onChange={() => toggleSelect(c.id)} /></td>
-                  <td>{renderEditableCell(c, "fullName")}</td><td>{renderEditableCell(c, "title")}</td><td>{renderEditableCell(c, "schoolName")}</td><td>{renderEditableCell(c, "schoolLevel")}</td>
+                  <td>{renderEditableCell(c, "fullName")}</td><td>{renderEditableCell(c, "title")}</td><td>{renderEditableCell(c, "orgName")}</td>
                   <td>{renderEditableCell(c, "email")}</td>
                   <td><span className={`badge ${lifecycleClass(c)}`}>{lifecycleLabel(c)}</span></td>
                   <td>
@@ -966,25 +820,25 @@ export default function ProspectsPage() {
         <div className="header-row">
           <h2 className="section-title">Approved</h2>
           <button type="button" className="secondary-btn" onClick={() => setApprovedGrouped((v) => !v)}>
-            {approvedGrouped ? "Flat List" : "Group by School"}
+            {approvedGrouped ? "Flat List" : "Group by Organization"}
           </button>
         </div>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Name</th><th>Title</th><th>School Name</th><th>School Level</th><th>Email</th><th>Lifecycle</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Name</th><th>Title</th><th>Organization</th><th>Email</th><th>Lifecycle</th><th>Actions</th></tr></thead>
             <tbody>
               {(approvedGrouped
-                ? approvedBySchool.flatMap(([schoolName, rows]) => [
-                    { __group: true as const, schoolName, count: rows.length },
+                ? approvedBySchool.flatMap(([orgName, rows]) => [
+                    { __group: true as const, orgName, count: rows.length },
                     ...rows,
                   ])
                 : approvedContacts
               ).map((row, idx) => {
                 if ("__group" in row) {
                   return (
-                    <tr key={`group-${row.schoolName}-${idx}`}>
+                    <tr key={`group-${row.orgName}-${idx}`}>
                       <td colSpan={7} style={{ background: "#eef3fb", fontWeight: 700 }}>
-                        {row.schoolName} ({row.count})
+                        {row.orgName} ({row.count})
                       </td>
                     </tr>
                   );
@@ -994,8 +848,7 @@ export default function ProspectsPage() {
                 <tr key={c.id}>
                   <td>{renderEditableCell(c, "fullName")}</td>
                   <td>{renderEditableCell(c, "title")}</td>
-                  <td>{renderEditableCell(c, "schoolName")}</td>
-                  <td>{renderEditableCell(c, "schoolLevel")}</td>
+                  <td>{renderEditableCell(c, "orgName")}</td>
                   <td>{renderEditableCell(c, "email")}</td>
                   <td><span className={`badge ${lifecycleClass(c)}`}>{lifecycleLabel(c)}</span></td>
                   <td>
@@ -1034,14 +887,13 @@ export default function ProspectsPage() {
         {rejectedOpen ? (
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Name</th><th>Title</th><th>School Name</th><th>School Level</th><th>Email</th><th>Lifecycle</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Name</th><th>Title</th><th>Organization</th><th>Email</th><th>Lifecycle</th><th>Actions</th></tr></thead>
               <tbody>
                 {rejectedContacts.map((c) => (
                   <tr key={c.id}>
                     <td>{renderEditableCell(c, "fullName")}</td>
                     <td>{renderEditableCell(c, "title")}</td>
-                    <td>{renderEditableCell(c, "schoolName")}</td>
-                    <td>{renderEditableCell(c, "schoolLevel")}</td>
+                    <td>{renderEditableCell(c, "orgName")}</td>
                     <td>{renderEditableCell(c, "email")}</td>
                     <td><span className={`badge ${lifecycleClass(c)}`}>{lifecycleLabel(c)}</span></td>
                     <td>

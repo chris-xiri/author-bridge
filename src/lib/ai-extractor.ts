@@ -1,14 +1,65 @@
 import { getEnv } from "./env";
-import type { Confidence, SchoolLevel } from "./types";
 
 export interface AiExtractedContact {
   fullName: string;
   title: string;
   email: string;
   phone: string;
-  schoolLevel: SchoolLevel;
-  confidence: Confidence;
-  evidence: string;
+}
+
+let cachedLatestModel: string | null = null;
+let lastFetchedTime = 0;
+
+export async function getLatestStableFlashModel(apiKey: string): Promise<string> {
+  const CACHE_TTL = 3600 * 1000; // 1 hour
+  if (cachedLatestModel && Date.now() - lastFetchedTime < CACHE_TTL) {
+    return cachedLatestModel;
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`,
+      { cache: "no-store", signal: controller.signal }
+    );
+    clearTimeout(timeoutId);
+
+    if (res.ok) {
+      const data = (await res.json()) as {
+        models?: Array<{ name: string; supportedMethods?: string[] }>;
+      };
+      const flashModels = (data.models ?? []).filter(
+        (m) =>
+          m.name.startsWith("models/gemini-") &&
+          m.name.endsWith("-flash") &&
+          !m.name.includes("-lite") &&
+          !m.name.includes("-exp") &&
+          m.supportedMethods?.includes("generateContent"),
+      );
+
+      let bestModel = "gemini-3.5-flash";
+      let maxVer = 3.5;
+
+      for (const m of flashModels) {
+        const match = m.name.match(/models\/gemini-([0-9.]+)-flash/);
+        if (match?.[1]) {
+          const ver = parseFloat(match[1]);
+          if (!isNaN(ver) && ver > maxVer) {
+            maxVer = ver;
+            bestModel = m.name.replace("models/", "");
+          }
+        }
+      }
+      cachedLatestModel = bestModel;
+      lastFetchedTime = Date.now();
+      return bestModel;
+    }
+  } catch (err) {
+    console.error("Failed to automatically query newest Gemini model:", err);
+  }
+
+  return "gemini-3.5-flash";
 }
 
 export async function inferOrganizationNameWithAi(args: {
@@ -30,7 +81,7 @@ export async function inferOrganizationNameWithAi(args: {
 
   let outputText = "";
   if (env.GEMINI_API_KEY) {
-    const model = env.GEMINI_MODEL || "gemini-2.0-flash";
+    const model = env.GEMINI_MODEL || await getLatestStableFlashModel(env.GEMINI_API_KEY);
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`,
       {
@@ -64,28 +115,22 @@ export async function inferOrganizationNameWithAi(args: {
   }
 }
 
-function normalizeLevel(level: string): SchoolLevel {
-  const v = level.toLowerCase();
-  if (v === "elementary" || v === "middle" || v === "high" || v === "university") return v;
-  return "unknown";
-}
+
 
 export async function extractContactsWithAi(args: {
   html: string;
   pageUrl: string;
   pageTitle: string;
-  allowedLevels: SchoolLevel[];
 }) {
   const env = getEnv();
   const text = args.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 18000);
 
   const prompt = [
-    "Extract school/public library staff contacts from this page.",
-    "Return ONLY librarian or library-media roles, not principal/dean/superintendent.",
+    "Extract school or public library staff contacts from this page.",
+    "Return ONLY library directors, librarians, or library media specialists, not principals/deans/superintendents/custodians.",
     "Title must be verbatim from the page near that person. Do not invent or normalize titles.",
     "If no explicit title is shown for a person, use an empty string for title.",
-    `Allowed levels: ${args.allowedLevels.join(", ")}.`,
-    "JSON output only with key contacts: [{fullName,title,email,phone,schoolLevel,confidence,evidence}]",
+    "JSON output only with key contacts: [{fullName,title,email,phone}]",
     `URL: ${args.pageUrl}`,
     `Title: ${args.pageTitle}`,
     `Content: ${text}`,
@@ -94,7 +139,7 @@ export async function extractContactsWithAi(args: {
   let outputText = "";
 
   if (env.GEMINI_API_KEY) {
-    const model = env.GEMINI_MODEL || "gemini-2.0-flash";
+    const model = env.GEMINI_MODEL || await getLatestStableFlashModel(env.GEMINI_API_KEY);
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`,
       {
@@ -144,11 +189,8 @@ export async function extractContactsWithAi(args: {
                       title: { type: "string" },
                       email: { type: "string" },
                       phone: { type: "string" },
-                      schoolLevel: { type: "string" },
-                      confidence: { type: "string" },
-                      evidence: { type: "string" },
                     },
-                    required: ["fullName", "title", "email", "phone", "schoolLevel", "confidence", "evidence"],
+                    required: ["fullName", "title", "email", "phone"],
                   },
                 },
               },
@@ -170,14 +212,7 @@ export async function extractContactsWithAi(args: {
   if (!outputText) return [] as AiExtractedContact[];
   try {
     const parsed = JSON.parse(outputText) as { contacts?: AiExtractedContact[] };
-    return (parsed.contacts ?? []).map((c) => ({
-      ...c,
-      schoolLevel: normalizeLevel(c.schoolLevel),
-      confidence:
-        c.confidence === "high" || c.confidence === "medium" || c.confidence === "low"
-          ? c.confidence
-          : ("medium" as Confidence),
-    }));
+    return parsed.contacts ?? [];
   } catch {
     return [] as AiExtractedContact[];
   }

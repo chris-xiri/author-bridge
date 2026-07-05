@@ -1,5 +1,4 @@
-import { google } from "googleapis";
-import { getEnv } from "./env";
+import { db } from "./firebase";
 import type {
   CampaignRow,
   ContactRow,
@@ -8,172 +7,73 @@ import type {
   SuppressionRow,
 } from "./types";
 
-const TAB_HEADERS = {
-  Organizations: [
-    "id",
-    "name",
-    "libraryType",
-    "schoolLevel",
-    "address",
-    "city",
-    "state",
-    "zip",
-    "county",
-    "website",
-    "phone",
-    "grades",
-    "status",
-    "sourceQuery",
-    "sourceUrl",
-    "createdAt",
-    "updatedAt",
-  ],
-  Contacts: [
-    "id",
-    "orgId",
-    "fullName",
-    "title",
-    "schoolName",
-    "roleBucket",
-    "roleConfidence",
-    "schoolLevel",
-    "email",
-    "phone",
-    "confidence",
-    "sourceQuery",
-    "sourceUrl",
-    "evidence",
-    "status",
-    "outreachStatus",
-    "unsubscribe",
-    "campaignId",
-    "createdAt",
-    "updatedAt",
-  ],
-  Campaigns: ["id", "name", "subject", "body", "status", "createdAt", "updatedAt"],
-  EmailEvents: [
-    "id",
-    "contactId",
-    "campaignId",
-    "eventType",
-    "providerMessageId",
-    "payload",
-    "createdAt",
-  ],
-  Suppressions: ["id", "email", "domain", "reason", "createdAt"],
-} as const;
-
-const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
-
-function sheetsClient() {
-  const env = getEnv();
-  const auth = new google.auth.JWT({
-    email: env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-    key: env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY.replace(/\\n/g, "\n"),
-    scopes: SCOPES,
-  });
-  return google.sheets({ version: "v4", auth });
-}
-
-async function readTab<T extends object>(tabName: keyof typeof TAB_HEADERS): Promise<T[]> {
-  const env = getEnv();
-  const sheets = sheetsClient();
-  const range = `${tabName}!A:ZZ`;
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: env.GOOGLE_SHEETS_SPREADSHEET_ID,
-    range,
-  });
-  const rows = res.data.values ?? [];
-  if (rows.length <= 1) return [];
-  const headers = rows[0];
-  return rows.slice(1).map((r) => {
-    const obj: Record<string, string> = {};
-    headers.forEach((h, i) => {
-      obj[h] = r[i] ?? "";
-    });
-    return obj as T;
-  });
-}
-
-async function writeTab(tabName: keyof typeof TAB_HEADERS, rows: Record<string, string>[]) {
-  const env = getEnv();
-  const sheets = sheetsClient();
-  const headers = [...TAB_HEADERS[tabName]];
-  const values: string[][] = [headers, ...rows.map((row) => headers.map((h) => row[h] ?? ""))];
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: env.GOOGLE_SHEETS_SPREADSHEET_ID,
-    range: `${tabName}!A1`,
-    valueInputOption: "RAW",
-    requestBody: { values },
-  });
-}
-
 export async function ensureSheetSchema() {
-  const env = getEnv();
-  const sheets = sheetsClient();
-  const spreadsheet = await sheets.spreadsheets.get({
-    spreadsheetId: env.GOOGLE_SHEETS_SPREADSHEET_ID,
-  });
-  const existing = new Set(
-    (spreadsheet.data.sheets ?? []).map((s) => s.properties?.title).filter(Boolean) as string[],
-  );
-  const missing = Object.keys(TAB_HEADERS).filter((t) => !existing.has(t));
-  if (missing.length) {
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: env.GOOGLE_SHEETS_SPREADSHEET_ID,
-      requestBody: {
-        requests: missing.map((title) => ({
-          addSheet: {
-            properties: { title },
-          },
-        })),
-      },
-    });
+  // Test connection to Firestore
+  await db.collection("Organizations").limit(1).get();
+}
+
+async function readCollection<T>(collectionName: string): Promise<T[]> {
+  const snapshot = await db.collection(collectionName).get();
+  return snapshot.docs.map((doc) => doc.data() as T);
+}
+
+async function writeCollection(collectionName: string, rows: any[]) {
+  // Firestore batch limit is 500 writes
+  const chunks = [];
+  for (let i = 0; i < rows.length; i += 500) {
+    chunks.push(rows.slice(i, i + 500));
   }
-  for (const tabName of Object.keys(TAB_HEADERS) as (keyof typeof TAB_HEADERS)[]) {
-    const rows = await readTab<Record<string, string>>(tabName);
-    if (!rows.length) {
-      await writeTab(tabName, []);
+
+  for (const chunk of chunks) {
+    const batch = db.batch();
+    for (const row of chunk) {
+      if (!row.id) {
+        // If there is no ID, generate a random one
+        row.id = db.collection(collectionName).doc().id;
+      }
+      const docRef = db.collection(collectionName).doc(row.id);
+      batch.set(docRef, row, { merge: true });
     }
+    await batch.commit();
   }
 }
 
 export async function listContacts() {
-  return readTab<ContactRow>("Contacts");
+  return readCollection<ContactRow>("Contacts");
 }
 
 export async function saveContacts(rows: ContactRow[]) {
-  return writeTab("Contacts", rows as unknown as Record<string, string>[]);
+  return writeCollection("Contacts", rows);
 }
 
 export async function listOrganizations() {
-  return readTab<OrganizationRow>("Organizations");
+  return readCollection<OrganizationRow>("Organizations");
 }
 
 export async function saveOrganizations(rows: OrganizationRow[]) {
-  return writeTab("Organizations", rows as unknown as Record<string, string>[]);
+  return writeCollection("Organizations", rows);
 }
 
 export async function listCampaigns() {
-  return readTab<CampaignRow>("Campaigns");
+  return readCollection<CampaignRow>("Campaigns");
 }
 
 export async function saveCampaigns(rows: CampaignRow[]) {
-  return writeTab("Campaigns", rows as unknown as Record<string, string>[]);
+  return writeCollection("Campaigns", rows);
 }
 
 export async function listEmailEvents() {
-  return readTab<EmailEventRow>("EmailEvents");
+  return readCollection<EmailEventRow>("EmailEvents");
 }
 
 export async function saveEmailEvents(rows: EmailEventRow[]) {
-  return writeTab("EmailEvents", rows as unknown as Record<string, string>[]);
+  return writeCollection("EmailEvents", rows);
 }
 
 export async function listSuppressions() {
-  return readTab<SuppressionRow>("Suppressions");
+  return readCollection<SuppressionRow>("Suppressions");
 }
 
 export async function saveSuppressions(rows: SuppressionRow[]) {
-  return writeTab("Suppressions", rows as unknown as Record<string, string>[]);
+  return writeCollection("Suppressions", rows);
 }

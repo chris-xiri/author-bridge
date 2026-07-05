@@ -13,7 +13,6 @@ export interface OrganizationRow {
   id: string;
   name: string;
   libraryType: "public" | "school" | "other";
-  schoolLevel: SchoolLevel;
   address: string;
   city: string;
   state: string;
@@ -34,16 +33,11 @@ export interface ContactRow {
   orgId: string;
   fullName: string;
   title: string;
-  schoolName: string;
-  roleBucket: RoleBucket;
-  roleConfidence: Confidence;
-  schoolLevel: SchoolLevel;
+  orgName: string;
   email: string;
   phone: string;
-  confidence: Confidence;
   sourceQuery: string;
   sourceUrl: string;
-  evidence: string;
   status: ContactStatus;
   outreachStatus: OutreachStatus;
   unsubscribe: "true" | "false";
@@ -83,8 +77,7 @@ export interface SuppressionRow {
 export interface ProspectRunInput {
   campaignName: string;
   geoTargets: string[];
-  keywords: string[];
-  includeTerms?: string[];
-  excludeTerms?: string[];
-  schoolLevels?: SchoolLevel[];
+  maxResultsPerQuery?: number;
+  prospectPublicLibraries?: boolean;
+  prospectSchoolLibraries?: boolean;
 }

@@ -44,6 +44,9 @@ const schema = z.object({
   RESEND_FROM_EMAIL: requiredEmail,
   APP_BASE_URL: requiredUrl,
   RESEND_WEBHOOK_SECRET: requiredString(10),
+  FIREBASE_PROJECT_ID: requiredString(5),
+  FIREBASE_CLIENT_EMAIL: requiredEmail,
+  FIREBASE_PRIVATE_KEY: requiredString(30),
 }).superRefine((data, ctx) => {
   if (!data.SERPAPI_API_KEY && !data.SERPER_API_KEY) {
     ctx.addIssue({
@@ -64,6 +67,13 @@ const schema = z.object({
       code: z.ZodIssueCode.custom,
       message: "GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY appears to be a placeholder; use the real key",
       path: ["GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY"],
+    });
+  }
+  if (!data.FIREBASE_PRIVATE_KEY.includes("BEGIN PRIVATE KEY")) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "FIREBASE_PRIVATE_KEY is not a valid PEM private key",
+      path: ["FIREBASE_PRIVATE_KEY"],
     });
   }
 });
