@@ -30,8 +30,6 @@ export default function ProspectsPage() {
   const [prospectorOpen, setProspectorOpen] = useState(false);
   const [advancedTargetingOpen, setAdvancedTargetingOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [levelFilter, setLevelFilter] = useState<string>("all");
-  const [roleFilter, setRoleFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("pending_review");
   const [rejectedOpen, setRejectedOpen] = useState(false);
   const [approvedGrouped, setApprovedGrouped] = useState(true);
@@ -283,30 +281,14 @@ export default function ProspectsPage() {
 
   function beginInlineEdit(contact: Contact, field: "fullName" | "title" | "orgName" | "email") {
     setEditing({ id: contact.id, field });
-    const current = field === "schoolLevel" ? schoolLevelLabel(contact.schoolLevel) : (contact[field] || "");
+    const current = contact[field] || "";
     setEditValue((current || "").toString());
-  }
-
-  function normalizeSchoolLevelInput(value: string) {
-    const v = value.trim().toLowerCase();
-    if (v.includes("elementary")) return "elementary";
-    if (v.includes("middle")) return "middle";
-    if (v.includes("high")) return "high";
-    if (v.includes("university") || v.includes("college")) return "university";
-    return "unknown";
   }
 
   async function commitInlineEdit(contact: Contact, field: "fullName" | "title" | "orgName" | "email") {
     const trimmed = editValue.trim();
     setEditing(null);
     try {
-      if (field === "schoolLevel") {
-        const normalized = normalizeSchoolLevelInput(trimmed);
-        if (normalized === (contact.schoolLevel || "unknown")) return;
-        await updateContactField(contact.id, field, normalized);
-        setUiNotice("Saved.");
-        return;
-      }
       if (trimmed === (contact[field] || "")) return;
       await updateContactField(contact.id, field, trimmed);
       setUiNotice("Saved.");
@@ -335,7 +317,7 @@ export default function ProspectsPage() {
         />
       );
     }
-    const displayValue = field === "schoolLevel" ? schoolLevelLabel(contact.schoolLevel) : contact[field];
+    const displayValue = contact[field] || "";
     return (
       <span onDoubleClick={() => beginInlineEdit(contact, field)} title="Double-click to edit">
         {displayValue || fallback}
@@ -379,15 +361,7 @@ export default function ProspectsPage() {
   }
 
 
-  function toggleLevel(level: string) {
-    setProspectForm((prev) => {
-      const has = prev.schoolLevels.includes(level);
-      return {
-        ...prev,
-        schoolLevels: has ? prev.schoolLevels.filter((v) => v !== level) : [...prev.schoolLevels, level],
-      };
-    });
-  }
+
 
   function splitBulkValues(value: string) {
     return value
@@ -397,7 +371,7 @@ export default function ProspectsPage() {
   }
 
   function addBadge(
-    key: "geoTargets" | "keywords" | "includeTerms" | "excludeTerms",
+    key: "geoTargets",
     value: string,
     setter: (v: string) => void,
   ) {
@@ -410,7 +384,7 @@ export default function ProspectsPage() {
     setter("");
   }
 
-  function removeBadge(key: "geoTargets" | "keywords" | "includeTerms" | "excludeTerms", value: string) {
+  function removeBadge(key: "geoTargets", value: string) {
     setProspectForm((prev) => ({ ...prev, [key]: prev[key].filter((v) => v !== value) }));
   }
 
@@ -469,14 +443,10 @@ export default function ProspectsPage() {
 
 
   const filteredContacts = contacts.filter((c) =>
-    (levelFilter === "all" ? true : (c.schoolLevel ?? "unknown") === levelFilter) &&
-    (roleFilter === "all" ? true : (c.roleBucket ?? "library_support") === roleFilter) &&
     (statusFilter === "all" ? true : c.status === statusFilter),
   );
   const pendingContacts = filteredContacts.filter((c) => c.status === "pending_review");
   const decidedContacts = contacts.filter((c) =>
-    (levelFilter === "all" ? true : (c.schoolLevel ?? "unknown") === levelFilter) &&
-    (roleFilter === "all" ? true : (c.roleBucket ?? "library_support") === roleFilter) &&
     c.status !== "pending_review",
   );
   const approvedContacts = decidedContacts.filter((c) => c.status === "approved");
@@ -529,14 +499,6 @@ export default function ProspectsPage() {
     return `${values.slice(0, max).join(", ")} +${values.length - max} more`;
   }
 
-  function schoolLevelLabel(level?: string) {
-    const v = (level || "unknown").toLowerCase();
-    if (v === "elementary") return "Elementary School";
-    if (v === "middle") return "Middle School";
-    if (v === "high") return "High School";
-    if (v === "university") return "University";
-    return "Unknown";
-  }
 
   return (
     <AppShell title="AuthorBridge Librarian CRM" subtitle="Prospecting queue and review workflow.">
@@ -605,37 +567,10 @@ export default function ProspectsPage() {
                   <input value={newGeo} onChange={(e) => setNewGeo(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addBadge("geoTargets", newGeo, setNewGeo); } }} placeholder="Add geo target(s): comma/newline + Enter" />
                 </div>
               </div>
+
               <div className="filter-group">
-                <span className="filter-label">School levels</span>
-                <div className="actions-inline level-toggles">
-                  {["elementary", "middle", "high", "university"].map((level) => (
-                    <button key={level} type="button" className={prospectForm.schoolLevels.includes(level) ? "toggle-on" : "toggle-off"} onClick={() => toggleLevel(level)}>
-                      {prospectForm.schoolLevels.includes(level) ? "✓ " : ""}{level}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="filter-group">
-                <span className="filter-label">Run filters</span>
+                <span className="filter-label">Run options</span>
                 <div className="actions-inline">
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={prospectForm.schoolsOnly}
-                      onChange={(e) => setProspectForm({ ...prospectForm, schoolsOnly: e.target.checked })}
-                      style={{ marginRight: 8 }}
-                    />
-                    Schools only
-                  </label>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={prospectForm.strictGeo}
-                      onChange={(e) => setProspectForm({ ...prospectForm, strictGeo: e.target.checked })}
-                      style={{ marginRight: 8 }}
-                    />
-                    Strict geo
-                  </label>
                   <input
                     aria-label="Results"
                     type="number"

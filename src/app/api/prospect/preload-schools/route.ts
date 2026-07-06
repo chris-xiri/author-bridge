@@ -144,7 +144,6 @@ async function runNationalPublicSchoolImport(input: z.infer<typeof bodySchema>) 
       const org = await upsertOrganization({
         name: schoolName,
         libraryType: "school",
-        schoolLevel: level,
         website: link,
         address,
         city,
@@ -222,7 +221,6 @@ async function runNationalPrivateSchoolImport(input: z.infer<typeof bodySchema>)
       const org = await upsertOrganization({
         name: schoolName,
         libraryType: "school",
-        schoolLevel: inferLevelFromName(schoolName),
         website: link,
         city,
         state,

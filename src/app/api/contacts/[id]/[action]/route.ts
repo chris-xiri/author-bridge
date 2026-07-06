@@ -17,21 +17,20 @@ export async function POST(
     const patch = (await req.json()) as Record<string, unknown>;
     if (typeof patch.fullName === "string") contact.fullName = patch.fullName.trim();
     if (typeof patch.title === "string") contact.title = patch.title.trim();
-    if (typeof patch.schoolName === "string") {
-      const nextSchool = patch.schoolName.trim();
-      contact.schoolName = nextSchool;
-      // Keep org name aligned with manual school edits so derived views stay consistent.
-      if (contact.orgId && nextSchool) {
+    if (typeof patch.orgName === "string") {
+      const nextOrg = patch.orgName.trim();
+      contact.orgName = nextOrg;
+      // Keep org name aligned with manual edits so derived views stay consistent.
+      if (contact.orgId && nextOrg) {
         const orgs = await listOrganizations();
         const orgIdx = orgs.findIndex((o) => o.id === contact.orgId);
         if (orgIdx >= 0) {
-          orgs[orgIdx].name = nextSchool;
+          orgs[orgIdx].name = nextOrg;
           orgs[orgIdx].updatedAt = nowIso();
           await saveOrganizations(orgs);
         }
       }
     }
-    if (typeof patch.schoolLevel === "string") contact.schoolLevel = patch.schoolLevel.trim().toLowerCase() as typeof contact.schoolLevel;
     if (typeof patch.email === "string") contact.email = patch.email.trim().toLowerCase();
   } else {
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });

@@ -37,8 +37,7 @@ export async function GET(req: NextRequest) {
       const sourceText = `${o.sourceQuery ?? ""} ${o.sourceUrl ?? ""} ${o.website ?? ""}`;
       return {
         id: o.id,
-        schoolName: o.name || "Unknown School",
-        schoolLevel: o.schoolLevel || "unknown",
+        orgName: o.name || "Unknown School",
         address: o.address || "",
         city: o.city || "",
         state: o.state || "",
@@ -49,7 +48,6 @@ export async function GET(req: NextRequest) {
           id: c.id,
           fullName: c.fullName,
           title: c.title,
-          schoolLevel: c.schoolLevel,
           email: c.email,
           status: c.status,
           outreachStatus: c.outreachStatus,
@@ -63,7 +61,7 @@ export async function GET(req: NextRequest) {
     if (zip) rows = rows.filter((r) => r.zip === zip);
     if (q) {
       rows = rows.filter((r) => {
-        const hay = `${r.schoolName} ${r.city} ${r.state} ${r.county} ${r.zip} ${r.website}`.toLowerCase();
+        const hay = `${r.orgName} ${r.city} ${r.state} ${r.county} ${r.zip} ${r.website}`.toLowerCase();
         if (hay.includes(q)) return true;
         return r.contacts.some((c) =>
           `${c.fullName} ${c.title} ${c.email}`.toLowerCase().includes(q),
