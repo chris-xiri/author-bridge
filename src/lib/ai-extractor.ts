@@ -144,8 +144,8 @@ export async function extractContactsWithAi(args: {
     "Target personas: Library Media Specialist, School Librarian, Public Librarian, Library Director, Youth Services Librarian, Media Center Coordinator, Library Assistant, or Instructional Technology Specialist.",
     "Do NOT extract generic organization emails (e.g. info@, contact@, support@, admin@) or non-person names (e.g. 'Staff', 'Contact Us', 'Library Team').",
     "Requirements for each contact:",
-    "1. fullName MUST be an actual person's first and last name.",
-    "2. email MUST be a valid person email address.",
+    "1. email MUST be a valid staff email address.",
+    "2. fullName should be their name. If name is not explicitly given, use their title or role.",
     "3. title should be verbatim or their role on the page.",
     "Return JSON only: {\"contacts\": [{\"fullName\":\"...\", \"title\":\"...\", \"email\":\"...\", \"phone\":\"...\"}]}",
     `URL: ${args.pageUrl}`,
@@ -172,11 +172,16 @@ export async function extractContactsWithAi(args: {
         cache: "no-store",
       },
     );
-    if (!res.ok) return [] as AiExtractedContact[];
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error(`Gemini API Error [${res.status} ${res.statusText}]:`, errText);
+      return extractContactsRegexFallback(args.html);
+    }
     const json = (await res.json()) as {
       candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
     };
     outputText = json.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+    console.log("RAW GEMINI OUTPUT:\n", outputText);
   } else if (env.OPENAI_API_KEY) {
     const model = env.OPENAI_MODEL || "gpt-4.1-mini";
     const res = await fetch("https://api.openai.com/v1/responses", {
@@ -234,14 +239,113 @@ export async function extractContactsWithAi(args: {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const genericNameRegex = /^(staff|contact\s*us|email\s*us|library|help\s*desk|admin|info|directory|general\s*inquiries)$/i;
 
-    return rawList.filter((c) => {
-      const name = (c.fullName || "").trim();
-      const email = (c.email || "").trim().toLowerCase();
-      if (!name || name.length < 3 || genericNameRegex.test(name)) return false;
-      if (!email || !emailRegex.test(email)) return false;
-      return true;
-    });
+    const validContacts: AiExtractedContact[] = [];
+
+    for (const c of rawList) {
+      let email = (c.email || "").trim().toLowerCase();
+      // Strip brackets or trailing punctuation
+      email = email.replace(/^[\[(<'"]+|[\])>'"]+$/g, "");
+      if (!email || !emailRegex.test(email)) continue;
+
+      let name = (c.fullName || "").trim();
+      let title = (c.title || "").trim();
+
+      // If name is missing or generic, fall back to title or email prefix
+      if (!name || name.length < 2 || genericNameRegex.test(name)) {
+        if (title && title.length >= 3) {
+          name = title;
+        } else {
+          const prefix = email.split("@")[0].replace(/[._-]/g, " ");
+          name = prefix.replace(/\b\w/g, (l) => l.toUpperCase());
+        }
+      }
+
+      validContacts.push({
+        fullName: name,
+        title: title || "Library Staff",
+        email,
+        phone: (c.phone || "").trim(),
+      });
+    }
+
+    if (validContacts.length > 0) return validContacts;
+    return extractContactsRegexFallback(args.html);
   } catch {
-    return [] as AiExtractedContact[];
+    return extractContactsRegexFallback(args.html);
   }
+}
+
+export function extractContactsRegexFallback(html: string): AiExtractedContact[] {
+  const preprocessed = html
+    .replace(/&#64;|&commat;/gi, "@")
+    .replace(/&#46;/gi, ".")
+    .replace(/<a[^>]+href=["']mailto:([^"'?]+)["'][^>]*>([\s\S]*?)<\/a>/gi, " $2 (Email: $1) ")
+    .replace(/href=["']mailto:([^"'?]+)["']/gi, " (Email: $1) ")
+    .replace(/data-email=["']([^"']+)["']/gi, " (Email: $1) ");
+
+  const cleanText = preprocessed
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<svg[\s\S]*?<\/svg>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ");
+
+  const rawEmails = preprocessed.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || [];
+  const uniqueEmails = Array.from(
+    new Set(rawEmails.map((e) => e.toLowerCase().replace(/^[\[(<'"]+|[\])>'"]+$/g, ""))),
+  );
+
+  const ignoreList = /^(info|contact|support|webmaster|admin|help|office|enquiries|sales|service|billing|newsletter|privacy)@/i;
+
+  const results: AiExtractedContact[] = [];
+
+  for (const email of uniqueEmails) {
+    if (ignoreList.test(email)) continue;
+
+    const idx = cleanText.toLowerCase().indexOf(email);
+    let snippet = "";
+    if (idx !== -1) {
+      const start = Math.max(0, idx - 100);
+      const end = Math.min(cleanText.length, idx + email.length + 100);
+      snippet = cleanText.slice(start, end);
+    }
+
+    let name = "";
+    let title = "Library Staff";
+
+    const nameMatch = snippet.match(
+      /(?:Mrs\.|Mr\.|Ms\.|Dr\.|Director|Manager|Coordinator)?\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/,
+    );
+    if (
+      nameMatch?.[1] &&
+      nameMatch[1].length >= 3 &&
+      !/Library|School|District|Public|Department|Board|Main|Station|Branch|Parkville|Lakeville/i.test(
+        nameMatch[1],
+      )
+    ) {
+      name = nameMatch[1];
+    } else {
+      const prefix = email.split("@")[0].replace(/[._-]/g, " ");
+      name = prefix.replace(/\b\w/g, (l) => l.toUpperCase());
+    }
+
+    if (
+      /Media\s*Specialist|Librarian|Director|Coordinator|Assistant|Teacher/i.test(snippet)
+    ) {
+      const tMatch = snippet.match(
+        /(Library\s*Media\s*Specialist|School\s*Librarian|Public\s*Librarian|Library\s*Director|Media\s*Center\s*Coordinator|Youth\s*Services\s*Librarian|Branch\s*Head)/i,
+      );
+      if (tMatch?.[1]) title = tMatch[1];
+    }
+
+    results.push({
+      fullName: name,
+      title,
+      email,
+      phone: "",
+    });
+  }
+
+  return results;
 }

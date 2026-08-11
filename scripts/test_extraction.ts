@@ -3,41 +3,44 @@ import { extractContactsWithAi, inferOrganizationNameWithAi } from "../src/lib/a
 
 async function runTest() {
   const geo = "Great Neck";
-  console.log(`=== RUNNING BACKEND EXTRACTION TEST FOR: "${geo}" ===\n`);
+  console.log(`=== EXECUTING COMPLETE BACKEND EXTRACTION FOR: "${geo}" ===\n`);
 
   const queries = [
     { type: "public", kw: `${geo} public library staff directory librarian` },
     { type: "school", kw: `${geo} school district library media specialist librarian directory` },
   ];
 
+  const allLeads: Array<{
+    orgName: string;
+    fullName: string;
+    title: string;
+    email: string;
+    phone: string;
+    sourceUrl: string;
+  }> = [];
+
   for (const q of queries) {
     console.log(`\n--- QUERY [${q.type.toUpperCase()}]: "${q.kw}" ---`);
     let results: Awaited<ReturnType<typeof searchSerpApi>> = [];
     try {
       results = await searchSerpApi(q.kw, 10);
-      console.log(`Found ${results.length} SERP results.`);
+      console.log(`SerpApi returned ${results.length} results.`);
     } catch (err) {
       console.error(`SERP search failed:`, err);
       continue;
     }
 
-    const topCandidates = results.slice(0, 5);
-    for (const item of topCandidates) {
-      console.log(`\n[Candidate Site]: ${item.title} -> ${item.link}`);
+    for (const item of results) {
+      console.log(`\n[Checking Site]: ${item.title} -> ${item.link}`);
       try {
         const mainHtml = await fetchPage(item.link);
-        console.log(`  Fetched main page (${mainHtml.length} bytes)`);
-
         const orgName = await inferOrganizationNameWithAi({
           html: mainHtml,
           pageUrl: item.link,
           pageTitle: item.title,
         });
-        console.log(`  Inferred Org Name: "${orgName}"`);
 
         const subLinks = findStaffLikeLinks(mainHtml, item.link).slice(0, 3);
-        console.log(`  Discovered ${subLinks.length} sub-links:`, subLinks);
-
         const pagesToProcess = [
           { url: item.link, html: mainHtml, isSub: false },
           ...await Promise.all(
@@ -53,29 +56,36 @@ async function runTest() {
         ].filter(Boolean) as Array<{ url: string; html: string; isSub: boolean }>;
 
         for (const targetPage of pagesToProcess) {
-          console.log(`  Extracting AI contacts from ${targetPage.isSub ? "SUB-PAGE" : "MAIN-PAGE"}: ${targetPage.url}`);
           const extracted = await extractContactsWithAi({
             html: targetPage.html,
             pageUrl: targetPage.url,
             pageTitle: item.title,
           });
 
-          if (extracted.length > 0) {
-            console.log(`  ✅ EXTRACTED ${extracted.length} CLEAN LEADS:`);
-            extracted.forEach((c, idx) => {
-              console.log(`     ${idx + 1}. Name: "${c.fullName}" | Title: "${c.title}" | Email: "${c.email}" | Phone: "${c.phone}"`);
+          for (const c of extracted) {
+            allLeads.push({
+              orgName: orgName || item.title,
+              fullName: c.fullName,
+              title: c.title,
+              email: c.email,
+              phone: c.phone,
+              sourceUrl: targetPage.url,
             });
-          } else {
-            console.log(`     (0 contacts extracted from this page)`);
+            console.log(`  ⭐ FOUND LEAD: ${c.fullName} (${c.title}) - ${c.email} [${targetPage.url}]`);
           }
         }
       } catch (err) {
-        console.log(`  ❌ Failed to fetch/process site: ${(err as Error).message}`);
+        console.log(`  ❌ Could not fetch: ${(err as Error).message}`);
       }
     }
   }
 
-  console.log("\n=== TEST COMPLETED ===");
+  console.log(`\n==================================================`);
+  console.log(`TOTAL CLEAN LEADS EXTRACTED FOR ${geo.toUpperCase()}: ${allLeads.length}`);
+  console.log(`==================================================\n`);
+  allLeads.forEach((l, i) => {
+    console.log(`${i + 1}. ${l.fullName} | ${l.title} | ${l.email} | Org: ${l.orgName}`);
+  });
 }
 
 runTest().catch(console.error);
