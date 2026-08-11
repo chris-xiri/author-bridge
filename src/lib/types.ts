@@ -38,6 +38,7 @@ export interface ContactRow {
   phone: string;
   sourceQuery: string;
   sourceUrl: string;
+  snippet?: string;
   status: ContactStatus;
   outreachStatus: OutreachStatus;
   unsubscribe: "true" | "false";

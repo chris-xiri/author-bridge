@@ -14,6 +14,7 @@ type Contact = {
   status: string;
   outreachStatus: string;
   sourceUrl: string;
+  snippet?: string;
 };
 type Campaign = { id: string; name: string; subject: string; body: string; status: "draft" | "sent" | "archived" };
 
@@ -28,6 +29,8 @@ export default function ProspectsPage() {
   const [uiNotice, setUiNotice] = useState("");
   const [lastRunDebug, setLastRunDebug] = useState<Record<string, unknown> | null>(null);
   const [progressPct, setProgressPct] = useState(0);
+  const [previewContact, setPreviewContact] = useState<Contact | null>(null);
+  const [previewData, setPreviewData] = useState<{ url: string; pageTitle: string; snippet: string; loading: boolean } | null>(null);
   const [prospectorOpen, setProspectorOpen] = useState(false);
   const [advancedTargetingOpen, setAdvancedTargetingOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -316,6 +319,47 @@ export default function ProspectsPage() {
         prev.map((c) => (c.id === id ? { ...c, status: "pending_review" } : c))
       );
       showToast(`❌ Failed to reject ${target?.fullName || "Contact"}`, "error");
+    }
+  }
+
+  async function openSourcePreview(contact: Contact) {
+    setPreviewContact(contact);
+    setPreviewData({ url: contact.sourceUrl || "", pageTitle: contact.orgName, snippet: "", loading: true });
+
+    if (!contact.sourceUrl) {
+      setPreviewData({ url: "", pageTitle: contact.orgName, snippet: "No source URL recorded for this contact.", loading: false });
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/contacts/preview-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: contact.sourceUrl, email: contact.email, fullName: contact.fullName }),
+      });
+      const json = await res.json();
+      if (res.ok && json.success) {
+        setPreviewData({
+          url: json.url,
+          pageTitle: json.pageTitle || contact.orgName,
+          snippet: json.snippet || "No textual snippet could be extracted.",
+          loading: false,
+        });
+      } else {
+        setPreviewData({
+          url: contact.sourceUrl,
+          pageTitle: contact.orgName,
+          snippet: json.error || "Failed to load live preview snippet.",
+          loading: false,
+        });
+      }
+    } catch {
+      setPreviewData({
+        url: contact.sourceUrl,
+        pageTitle: contact.orgName,
+        snippet: "Network error loading page snippet preview.",
+        loading: false,
+      });
     }
   }
 
@@ -844,6 +888,9 @@ export default function ProspectsPage() {
                   <td><span className={`badge ${lifecycleClass(c)}`}>{lifecycleLabel(c)}</span></td>
                     <td>
                       <div className="actions-inline table-actions">
+                        <button type="button" className="secondary-btn" onClick={() => openSourcePreview(c)} title="Preview scraped webpage text snippet">
+                          👁️ Source
+                        </button>
                         {c.status !== "approved" && (
                           <button type="button" className="btn-approve" onClick={() => approve(c.id)}>✓ Approve</button>
                         )}
@@ -955,6 +1002,81 @@ export default function ProspectsPage() {
           </div>
         ) : null}
       </section>
+
+      {previewContact && previewData && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 120, background: "rgba(15, 23, 42, 0.6)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div style={{ background: "#ffffff", borderRadius: 16, width: "100%", maxWidth: 640, maxHeight: "90vh", overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)", border: "1px solid #e2e8f0" }}>
+            {/* Modal Header */}
+            <div style={{ padding: "16px 20px", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#f8fafc" }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "#0284c7", letterSpacing: "0.05em" }}>
+                  Source Page Preview
+                </div>
+                <h3 style={{ margin: "2px 0 0", fontSize: 16, fontWeight: 700, color: "#0f172a" }}>
+                  {previewContact.fullName} — {previewContact.title}
+                </h3>
+              </div>
+              <button onClick={() => setPreviewContact(null)} style={{ background: "none", border: "none", color: "#64748b", fontSize: 18, cursor: "pointer" }}>✕</button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: 20, overflowY: "auto", flex: 1 }}>
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase" }}>Organization & Web Page</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "#1e293b", marginTop: 2 }}>{previewData.pageTitle}</div>
+                {previewData.url ? (
+                  <a href={previewData.url} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "#0284c7", wordBreak: "break-all", display: "inline-block", marginTop: 4 }}>
+                    🔗 Open Original Webpage ({previewData.url}) ↗
+                  </a>
+                ) : null}
+              </div>
+
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", marginBottom: 6 }}>
+                  Scraped Text Snippet ({previewContact.email})
+                </div>
+                {previewData.loading ? (
+                  <div style={{ padding: 24, textAlign: "center", color: "#64748b", fontSize: 13, background: "#f8fafc", borderRadius: 8 }}>
+                    Fetching live webpage text snippet...
+                  </div>
+                ) : (
+                  <div style={{ background: "#0f172a", color: "#e2e8f0", padding: 14, borderRadius: 10, fontSize: 13, fontFamily: "monospace", lineHeight: 1.6, whiteSpace: "pre-wrap", maxHeight: 240, overflowY: "auto" }}>
+                    {previewData.snippet}
+                  </div>
+                )}
+              </div>
+
+              {/* Quick Title Edit in Modal */}
+              <div style={{ background: "#f0f9ff", border: "1px solid #bae6fd", padding: 12, borderRadius: 10 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#0369a1", marginBottom: 6 }}>Clarify / Update Title</div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input
+                    value={previewContact.title}
+                    onChange={(e) => {
+                      const nextTitle = e.target.value;
+                      setPreviewContact({ ...previewContact, title: nextTitle });
+                      setContacts((prev) => prev.map((c) => c.id === previewContact.id ? { ...c, title: nextTitle } : c));
+                    }}
+                    placeholder="e.g. Library Media Specialist"
+                    style={{ flex: 1, padding: "6px 10px", fontSize: 13 }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void approve(previewContact.id);
+                      setPreviewContact(null);
+                    }}
+                    className="btn-approve"
+                    style={{ whiteSpace: "nowrap" }}
+                  >
+                    ✓ Save & Approve
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {toast && (
         <div className={`toast-pill toast-${toast.type}`}>
