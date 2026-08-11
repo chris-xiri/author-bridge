@@ -68,7 +68,12 @@ export async function inferOrganizationNameWithAi(args: {
   pageTitle: string;
 }) {
   const env = getEnv();
-  const text = args.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 12000);
+  const cleanedHtml = args.html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<svg[\s\S]*?<\/svg>/gi, " ");
+  const text = cleanedHtml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 12000);
   const prompt = [
     "Infer the institution/school/library organization name for this page.",
     "Return one concise proper name only.",
@@ -115,8 +120,6 @@ export async function inferOrganizationNameWithAi(args: {
   }
 }
 
-
-
 export async function extractContactsWithAi(args: {
   html: string;
   pageUrl: string;
@@ -124,6 +127,10 @@ export async function extractContactsWithAi(args: {
 }) {
   const env = getEnv();
   let preprocessedHtml = args.html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<svg[\s\S]*?<\/svg>/gi, " ")
     .replace(/&#64;|&commat;/gi, "@")
     .replace(/&#46;/gi, ".")
     .replace(/<a[^>]+href=["']mailto:([^"'?]+)["'][^>]*>([\s\S]*?)<\/a>/gi, " $2 (Email: $1) ")

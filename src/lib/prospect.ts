@@ -98,6 +98,13 @@ export async function fetchPage(url: string) {
 }
 
 export function findStaffLikeLinks(html: string, baseUrl: string) {
+  let baseHostname = "";
+  try {
+    baseHostname = new URL(baseUrl).hostname.replace(/^www\./i, "");
+  } catch {
+    return [];
+  }
+
   const links = Array.from(
     html.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi),
   )
@@ -107,11 +114,21 @@ export function findStaffLikeLinks(html: string, baseUrl: string) {
   const resolved = links
     .map((x) => {
       try {
-        return new URL(x.href, baseUrl).toString();
+        const u = new URL(x.href, baseUrl);
+        const host = u.hostname.replace(/^www\./i, "");
+        // Must be same domain or subdomain
+        if (!host.endsWith(baseHostname) && !baseHostname.endsWith(host)) {
+          return "";
+        }
+        // Exclude social/external anchors
+        if (/\.(pdf|png|jpg|jpeg|gif|css|js)$/i.test(u.pathname)) return "";
+        if (/facebook|twitter|instagram|linkedin|youtube|google\.com\/maps|booking/i.test(u.href)) return "";
+        return u.toString();
       } catch {
         return "";
       }
     })
-    .filter(Boolean);
+    .filter((u) => u && u !== baseUrl);
+
   return Array.from(new Set(resolved)).slice(0, 5);
 }
