@@ -1,8 +1,9 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { ALL_STATES, GEO_DATA } from "@/lib/geo-data";
+import { ALL_STATES, GEO_DATA, ResolvedGeoQuery } from "@/lib/geo-data";
 import { AppShell } from "@/components/app-shell";
+import { GeoSearchBar } from "@/components/geo-search-bar";
 
 type Contact = {
   id: string;
@@ -38,6 +39,8 @@ export default function ProspectsPage() {
   const [stateCode, setStateCode] = useState("");
   const [countyName, setCountyName] = useState("");
   const [manualCounty, setManualCounty] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [resolvedGeo, setResolvedGeo] = useState<ResolvedGeoQuery | null>(null);
   const [prospectForm, setProspectForm] = useState({
     campaignName: "May Librarian Outreach",
     maxResultsPerQuery: 50,
@@ -46,6 +49,16 @@ export default function ProspectsPage() {
     prospectSchoolLibraries: true,
   });
   const [newGeo, setNewGeo] = useState("");
+
+  function handleProspectGeo(geo: ResolvedGeoQuery) {
+    const targets = geo.towns.length > 0 ? geo.towns : [geo.primaryLabel];
+    setProspectForm((prev) => ({
+      ...prev,
+      geoTargets: Array.from(new Set([...prev.geoTargets, ...targets])),
+    }));
+    setProspectorOpen(true);
+    setUiNotice(`Added ${targets.join(", ")} to prospecting targets. Click 'Run Prospector' to search!`);
+  }
 
   async function parseJsonSafe(res: Response) {
     const text = await res.text();
@@ -525,6 +538,25 @@ export default function ProspectsPage() {
     document.body.removeChild(link);
   }
 
+  const searchFilteredContacts = contacts.filter((c) => {
+    if (statusFilter !== "all" && c.status !== statusFilter) return false;
+    if (!searchQuery.trim()) return true;
+
+    const text = `${c.fullName} ${c.title} ${c.orgName} ${c.email} ${c.sourceUrl}`.toLowerCase();
+    const q = searchQuery.toLowerCase().trim();
+
+    if (text.includes(q)) return true;
+
+    if (resolvedGeo && resolvedGeo.towns.length > 0) {
+      return resolvedGeo.towns.some((t) => {
+        const townClean = t.split(",")[0].toLowerCase();
+        return text.includes(townClean);
+      });
+    }
+
+    return false;
+  });
+
   return (
     <AppShell title="AuthorBridge Librarian CRM" subtitle="Prospecting queue and review workflow.">
       {uiError ? <div className="error-banner">{uiError}</div> : null}
@@ -602,14 +634,14 @@ export default function ProspectsPage() {
                   <input
                     aria-label="Results"
                     type="number"
-                    min={5}
+                    min={0}
                     max={100}
                     value={prospectForm.maxResultsPerQuery}
                     onChange={(e) =>
                       setProspectForm({
                         ...prospectForm,
                         maxResultsPerQuery: Number.isFinite(Number(e.target.value))
-                          ? Math.max(5, Math.min(100, Number(e.target.value)))
+                          ? Math.max(0, Math.min(100, Number(e.target.value)))
                           : 50,
                       })
                     }
@@ -730,6 +762,43 @@ export default function ProspectsPage() {
       ) : null}
 
       <section className="panel">
+        <div style={{ marginBottom: "1.5rem", display: "flex", flexDirection: "column", gap: "1rem" }}>
+          <div>
+            <h2 className="section-title" style={{ marginBottom: 4 }}>Find Contacts & Organizations</h2>
+            <p style={{ margin: 0, fontSize: 13, color: "#64748b" }}>
+              Search across saved contacts by Town, County, Zip Code, Name, Title, or Organization.
+            </p>
+          </div>
+
+          <GeoSearchBar
+            initialValue={searchQuery}
+            onSearchChange={(q, r) => {
+              setSearchQuery(q);
+              setResolvedGeo(r);
+            }}
+            onProspectLocation={handleProspectGeo}
+          />
+
+          {searchQuery && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#f8fafc", padding: "0.75rem 1rem", borderRadius: "0.75rem", border: "1px solid #e2e8f0" }}>
+              <div style={{ fontSize: 13, color: "#334155" }}>
+                Found <strong>{searchFilteredContacts.length}</strong> matching contacts for &quot;<strong>{searchQuery}</strong>&quot;
+                {resolvedGeo?.primaryLabel && <span style={{ color: "#64748b" }}> ({resolvedGeo.primaryLabel})</span>}
+              </div>
+
+              {searchFilteredContacts.length === 0 && resolvedGeo && (
+                <button
+                  type="button"
+                  onClick={() => handleProspectGeo(resolvedGeo)}
+                  style={{ background: "#0284c7", color: "#fff", border: "none", padding: "0.4rem 0.8rem", borderRadius: "0.5rem", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+                >
+                  ⚡ Prospect {resolvedGeo.primaryLabel} Now
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
         <h2 className="section-title">Review Queue</h2>
         <div className="filters-bar">
           <div className="filter-group">
@@ -745,7 +814,8 @@ export default function ProspectsPage() {
             type="button"
             className="secondary-btn"
             onClick={() => {
-              
+              setSearchQuery("");
+              setResolvedGeo(null);
               setStatusFilter("pending_review");
             }}
           >
@@ -761,7 +831,7 @@ export default function ProspectsPage() {
           <table>
             <thead><tr><th></th><th>Name</th><th>Title</th><th>Organization</th><th>Email</th><th>Lifecycle</th><th>Actions</th></tr></thead>
             <tbody>
-              {pendingContacts.map((c) => (
+              {searchFilteredContacts.map((c) => (
                 <tr key={c.id}>
                   <td><input type="checkbox" checked={selected.has(c.id)} onChange={() => toggleSelect(c.id)} /></td>
                   <td>{renderEditableCell(c, "fullName")}</td><td>{renderEditableCell(c, "title")}</td><td>{renderEditableCell(c, "orgName")}</td>

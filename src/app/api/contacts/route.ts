@@ -6,6 +6,10 @@ export async function GET(req: NextRequest) {
     const params = req.nextUrl.searchParams;
     const status = params.get("status");
     const campaign = params.get("campaign");
+    const searchQ = (params.get("query") || params.get("q") || "").trim().toLowerCase();
+    const townQ = (params.get("town") || "").trim().toLowerCase();
+    const countyQ = (params.get("county") || "").trim().toLowerCase();
+    const zipQ = (params.get("zip") || "").trim().toLowerCase();
     const pageParam = params.get("page");
     const pageSizeParam = params.get("pageSize");
 
@@ -13,6 +17,17 @@ export async function GET(req: NextRequest) {
 
     if (status) contacts = contacts.filter((c) => c.status === status);
     if (campaign) contacts = contacts.filter((c) => c.campaignId === campaign);
+
+    if (searchQ || townQ || countyQ || zipQ) {
+      contacts = contacts.filter((c) => {
+        const text = `${c.fullName} ${c.title} ${c.orgName} ${c.email} ${c.sourceUrl}`.toLowerCase();
+        if (searchQ && !text.includes(searchQ)) return false;
+        if (townQ && !text.includes(townQ)) return false;
+        if (countyQ && !text.includes(countyQ)) return false;
+        if (zipQ && !text.includes(zipQ)) return false;
+        return true;
+      });
+    }
 
     if (pageParam || pageSizeParam) {
       const page = Number(pageParam ?? "1");
