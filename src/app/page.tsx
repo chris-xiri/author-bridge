@@ -201,13 +201,18 @@ export default function ProspectsPage() {
             if (event === "progress") {
               if (data.message) setUiNotice(data.message);
               if (data.pct) setProgressPct(data.pct);
+            } else if (event === "contact_found" && data.contact) {
+              const foundContact = data.contact as Contact;
+              setContacts((prev) => {
+                if (prev.some((c) => c.email.toLowerCase() === foundContact.email.toLowerCase())) {
+                  return prev;
+                }
+                return [foundContact, ...prev];
+              });
+              setUiNotice(`⚡ Live Discovered: ${foundContact.fullName} (${foundContact.email}) at ${foundContact.orgName}`);
             } else if (event === "done") {
               setProgressPct(100);
-              const debug = data.debug ?? {};
-              setLastRunDebug(debug);
-              const perGeo = Array.isArray(debug.perGeoStats) ? (debug.perGeoStats as Array<{ geo: string; accepted: number }>) : [];
-              const geosWithContacts = perGeo.filter((g) => (g.accepted ?? 0) > 0).length;
-              setUiNotice(`Prospecting complete. Discovered ${data.discoveredCount ?? 0}, queued ${data.queuedForReviewCount ?? 0}. Coverage: ${geosWithContacts}/${prospectForm.geoTargets.length} towns produced contacts.`);
+              setUiNotice(`Prospecting complete! Discovered ${data.discoveredCount ?? 0} leads across target locations.`);
             } else if (event === "error") {
               throw new Error(data.error || "Stream error");
             }
@@ -221,7 +226,6 @@ export default function ProspectsPage() {
       setUiError(error instanceof Error ? error.message : "Unexpected prospecting error");
       setProgressPct(0);
       setBusy("");
-      setLastRunDebug(null);
     } finally {
       setTimeout(() => setProgressPct(0), 1000);
     }
@@ -561,6 +565,38 @@ export default function ProspectsPage() {
     <AppShell title="AuthorBridge Librarian CRM" subtitle="Prospecting queue and review workflow.">
       {uiError ? <div className="error-banner">{uiError}</div> : null}
       {uiNotice ? <div className="notice-banner">{uiNotice}</div> : null}
+
+      <div className="stats-grid">
+        <div className="stat-card">
+          <div>
+            <div className="stat-val">{contacts.length}</div>
+            <div className="stat-lbl">Total Contacts</div>
+          </div>
+          <div className="stat-icon" style={{ background: "#e0f2fe", color: "#0284c7" }}>👥</div>
+        </div>
+        <div className="stat-card">
+          <div>
+            <div className="stat-val">{contacts.filter((c) => c.status === "pending_review").length}</div>
+            <div className="stat-lbl">Pending Review</div>
+          </div>
+          <div className="stat-icon" style={{ background: "#fef3c7", color: "#d97706" }}>⏳</div>
+        </div>
+        <div className="stat-card">
+          <div>
+            <div className="stat-val">{contacts.filter((c) => c.status === "approved").length}</div>
+            <div className="stat-lbl">Approved Leads</div>
+          </div>
+          <div className="stat-icon" style={{ background: "#dcfce7", color: "#16a34a" }}>✅</div>
+        </div>
+        <div className="stat-card">
+          <div>
+            <div className="stat-val">{prospectForm.geoTargets.length}</div>
+            <div className="stat-lbl">Target Towns</div>
+          </div>
+          <div className="stat-icon" style={{ background: "#f3e8ff", color: "#9333ea" }}>🗺️</div>
+        </div>
+      </div>
+
       <section className="panel" id="prospects">
         <div className="header-row">
           <h2 className="section-title">Auto-Prospector Settings</h2>
@@ -679,87 +715,6 @@ export default function ProspectsPage() {
           </form>
         ) : null}
       </section>
-      {lastRunDebug ? (
-        <section className="panel">
-          <h2 className="section-title">Last Run Diagnostics</h2>
-          <div className="diag-rows">
-            <div className="filter-group">
-              <span className="filter-label">Funnel summary</span>
-              {lastRunDebug.funnel ? (
-                <ul style={{ maxWidth: 1300, margin: 0, paddingLeft: 18, fontSize: 13, color: "#445b7f", lineHeight: 1.5 }}>
-                  <li>Queries executed: {String((lastRunDebug.funnel as { queriesExecuted?: number }).queriesExecuted ?? 0)}</li>
-                  <li>SERP results returned: {String((lastRunDebug.funnel as { serpResults?: number }).serpResults ?? 0)}</li>
-                  <li>URLs visited: {String((lastRunDebug.funnel as { urlsVisited?: number }).urlsVisited ?? 0)}</li>
-                  <li>Candidate contacts extracted: {String((lastRunDebug.funnel as { candidateContacts?: number }).candidateContacts ?? 0)}</li>
-                  <li>Dropped duplicate email: {String((lastRunDebug.funnel as { dropped?: { duplicateEmail?: number } }).dropped?.duplicateEmail ?? 0)}</li>
-                  <li>Dropped missing email: {String((lastRunDebug.funnel as { dropped?: { missingEmail?: number } }).dropped?.missingEmail ?? 0)}</li>
-                  <li>Dropped role mismatch: {String((lastRunDebug.funnel as { dropped?: { role?: number } }).dropped?.role ?? 0)}</li>
-                  <li>Dropped confidence: {String((lastRunDebug.funnel as { dropped?: { confidence?: number } }).dropped?.confidence ?? 0)}</li>
-                  <li>Dropped schools-only filter: {String((lastRunDebug.funnel as { dropped?: { schoolsOnly?: number } }).dropped?.schoolsOnly ?? 0)}</li>
-                  <li>Dropped name/email validation: {String((lastRunDebug.funnel as { dropped?: { nameEmailValidation?: number } }).dropped?.nameEmailValidation ?? 0)}</li>
-                  <li>Queued final: {String((lastRunDebug.funnel as { queued?: number }).queued ?? 0)}</li>
-                </ul>
-              ) : (
-                <div style={{ maxWidth: 900, fontSize: 13, color: "#445b7f" }}>No funnel summary available.</div>
-              )}
-            </div>
-            <div className="filter-group">
-              <span className="filter-label">1) Executed Google Queries</span>
-              {Array.isArray(lastRunDebug.executedQueries) && lastRunDebug.executedQueries.length ? (
-                <ul style={{ maxWidth: 1300, margin: 0, paddingLeft: 18, fontSize: 13, color: "#445b7f", lineHeight: 1.5 }}>
-                  {(lastRunDebug.executedQueries as string[]).slice(0, 80).map((v, idx) => (
-                    <li key={`executed-query-${idx}`}>{v}</li>
-                  ))}
-                </ul>
-              ) : (
-                <div style={{ maxWidth: 900, fontSize: 13, color: "#445b7f" }}>No query log available.</div>
-              )}
-            </div>
-            <div className="filter-group">
-              <span className="filter-label">2) Failed queries (with error reason)</span>
-              {Array.isArray(lastRunDebug.failedQueryDetails) && lastRunDebug.failedQueryDetails.length ? (
-                <ul style={{ maxWidth: 1300, margin: 0, paddingLeft: 18, fontSize: 13, color: "#445b7f", lineHeight: 1.5 }}>
-                  {(lastRunDebug.failedQueryDetails as Array<{ query: string; error: string }>).slice(0, 40).map((v, idx) => (
-                    <li key={`failed-query-${idx}`}><strong>{v.error}</strong>: {v.query}</li>
-                  ))}
-                </ul>
-              ) : (
-                Array.isArray(lastRunDebug.failedQueries) && lastRunDebug.failedQueries.length ? (
-                  <ul style={{ maxWidth: 1200, margin: 0, paddingLeft: 18, fontSize: 13, color: "#445b7f", lineHeight: 1.5 }}>
-                    {(lastRunDebug.failedQueries as string[]).slice(0, 20).map((v, idx) => (
-                      <li key={`failed-query-legacy-${idx}`}>{v}</li>
-                    ))}
-                  </ul>
-                ) : <div style={{ maxWidth: 900, fontSize: 13, color: "#445b7f" }}>None</div>
-              )}
-            </div>
-            <div className="filter-group">
-              <span className="filter-label">3) SERP rejected samples</span>
-              {Array.isArray(lastRunDebug.serpRejectedSamples) && lastRunDebug.serpRejectedSamples.length ? (
-                <ul style={{ maxWidth: 1200, margin: 0, paddingLeft: 18, fontSize: 13, color: "#445b7f", lineHeight: 1.5 }}>
-                  {(lastRunDebug.serpRejectedSamples as string[]).slice(0, 20).map((v, idx) => (
-                    <li key={`serp-rejected-${idx}`}>{v}</li>
-                  ))}
-                </ul>
-              ) : (
-                <div style={{ maxWidth: 900, fontSize: 13, color: "#445b7f" }}>None</div>
-              )}
-            </div>
-            <div className="filter-group">
-              <span className="filter-label">4) Schools-only filtered samples</span>
-              {Array.isArray(lastRunDebug.schoolsOnlyFilteredSamples) && lastRunDebug.schoolsOnlyFilteredSamples.length ? (
-                <ul style={{ maxWidth: 1200, margin: 0, paddingLeft: 18, fontSize: 13, color: "#445b7f", lineHeight: 1.5 }}>
-                  {(lastRunDebug.schoolsOnlyFilteredSamples as string[]).slice(0, 20).map((v, idx) => (
-                    <li key={`schools-only-${idx}`}>{v}</li>
-                  ))}
-                </ul>
-              ) : (
-                <div style={{ maxWidth: 900, fontSize: 13, color: "#445b7f" }}>None</div>
-              )}
-            </div>
-          </div>
-        </section>
-      ) : null}
 
       <section className="panel">
         <div style={{ marginBottom: "1.5rem", display: "flex", flexDirection: "column", gap: "1rem" }}>

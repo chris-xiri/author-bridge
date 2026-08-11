@@ -8,7 +8,7 @@ import { ensureSheetSchema, listContacts } from "@/lib/sheets";
 const bodySchema = z.object({
   campaignName: z.string().min(1),
   geoTargets: z.array(z.string().min(1)).min(1),
-  maxResultsPerQuery: z.number().int().min(5).max(100).optional(),
+  maxResultsPerQuery: z.number().int().min(0).max(100).optional(),
   prospectPublicLibraries: z.boolean().optional(),
   prospectSchoolLibraries: z.boolean().optional(),
 });
@@ -149,6 +149,12 @@ export async function POST(req: Request) {
                   discoveredCount++;
                   queuedForReviewCount++;
                   
+                  await sendEvent("contact_found", {
+                    contact: row,
+                    discoveredCount,
+                    message: `Discovered ${row.fullName} (${row.email}) at ${org.name}`,
+                    pct: Math.floor(10 + ((i / queryPlan.length) * 90)),
+                  });
                   await sendEvent("progress", { 
                     message: `Discovered ${row.fullName} (${row.email}) at ${org.name}`,
                     pct: Math.floor(10 + ((i / queryPlan.length) * 90))
