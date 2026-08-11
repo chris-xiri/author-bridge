@@ -123,7 +123,14 @@ export async function extractContactsWithAi(args: {
   pageTitle: string;
 }) {
   const env = getEnv();
-  const text = args.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 45000);
+  let preprocessedHtml = args.html
+    .replace(/&#64;|&commat;/gi, "@")
+    .replace(/&#46;/gi, ".")
+    .replace(/<a[^>]+href=["']mailto:([^"'?]+)["'][^>]*>([\s\S]*?)<\/a>/gi, " $2 (Email: $1) ")
+    .replace(/href=["']mailto:([^"'?]+)["']/gi, " (Email: $1) ")
+    .replace(/data-email=["']([^"']+)["']/gi, " (Email: $1) ");
+
+  const text = preprocessedHtml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 45000);
 
   const prompt = [
     "Extract library and school staff contacts from this page text.",

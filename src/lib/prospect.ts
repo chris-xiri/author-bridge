@@ -76,10 +76,25 @@ export async function searchSerpApi(query: string, num = 10): Promise<SerpResult
 export async function fetchPage(url: string) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 12000);
-  const res = await fetch(url, { cache: "no-store", signal: controller.signal });
-  clearTimeout(timer);
-  if (!res.ok) throw new Error(`Page request failed: ${res.status}`);
-  return res.text();
+  try {
+    const res = await fetch(url, {
+      cache: "no-store",
+      signal: controller.signal,
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+    });
+    clearTimeout(timer);
+    if (!res.ok) throw new Error(`Page request failed: ${res.status}`);
+    return res.text();
+  } catch (err) {
+    clearTimeout(timer);
+    throw err;
+  }
 }
 
 export function findStaffLikeLinks(html: string, baseUrl: string) {
