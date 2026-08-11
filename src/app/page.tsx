@@ -273,14 +273,50 @@ export default function ProspectsPage() {
     }
   }
 
+  const [toast, setToast] = useState<{ id: string; msg: string; type: "success" | "error" | "info" } | null>(null);
+
+  function showToast(msg: string, type: "success" | "error" | "info" = "success") {
+    const id = String(Date.now());
+    setToast({ id, msg, type });
+    setTimeout(() => {
+      setToast((prev) => (prev?.id === id ? null : prev));
+    }, 2000);
+  }
+
   async function approve(id: string) {
-    await fetch(`/api/contacts/${id}/approve`, { method: "POST" });
-    await loadContacts();
+    const target = contacts.find((c) => c.id === id);
+    setContacts((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, status: "approved" } : c))
+    );
+    showToast(`✓ Approved ${target?.fullName || "Contact"}`, "success");
+
+    try {
+      const res = await fetch(`/api/contacts/${id}/approve`, { method: "POST" });
+      if (!res.ok) throw new Error();
+    } catch {
+      setContacts((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, status: "pending_review" } : c))
+      );
+      showToast(`❌ Failed to approve ${target?.fullName || "Contact"}`, "error");
+    }
   }
 
   async function reject(id: string) {
-    await fetch(`/api/contacts/${id}/reject`, { method: "POST" });
-    await loadContacts();
+    const target = contacts.find((c) => c.id === id);
+    setContacts((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, status: "rejected" } : c))
+    );
+    showToast(`🚫 Rejected ${target?.fullName || "Contact"}`, "info");
+
+    try {
+      const res = await fetch(`/api/contacts/${id}/reject`, { method: "POST" });
+      if (!res.ok) throw new Error();
+    } catch {
+      setContacts((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, status: "pending_review" } : c))
+      );
+      showToast(`❌ Failed to reject ${target?.fullName || "Contact"}`, "error");
+    }
   }
 
   async function updateContactField(id: string, field: "fullName" | "title" | "orgName" | "email", value: string) {
@@ -362,19 +398,33 @@ export default function ProspectsPage() {
   }
 
   async function bulkApprove() {
-    for (const id of Array.from(selected)) {
-      await fetch(`/api/contacts/${id}/approve`, { method: "POST" });
-    }
+    const targetIds = Array.from(selected);
+    if (!targetIds.length) return;
+    
     setSelected(new Set());
-    await loadContacts();
+    setContacts((prev) =>
+      prev.map((c) => (targetIds.includes(c.id) ? { ...c, status: "approved" } : c))
+    );
+    showToast(`✓ Approved ${targetIds.length} contacts!`, "success");
+
+    await Promise.allSettled(
+      targetIds.map((id) => fetch(`/api/contacts/${id}/approve`, { method: "POST" }))
+    );
   }
 
   async function bulkReject() {
-    for (const id of Array.from(selected)) {
-      await fetch(`/api/contacts/${id}/reject`, { method: "POST" });
-    }
+    const targetIds = Array.from(selected);
+    if (!targetIds.length) return;
+
     setSelected(new Set());
-    await loadContacts();
+    setContacts((prev) =>
+      prev.map((c) => (targetIds.includes(c.id) ? { ...c, status: "rejected" } : c))
+    );
+    showToast(`🚫 Rejected ${targetIds.length} contacts!`, "info");
+
+    await Promise.allSettled(
+      targetIds.map((id) => fetch(`/api/contacts/${id}/reject`, { method: "POST" }))
+    );
   }
 
 
@@ -792,12 +842,16 @@ export default function ProspectsPage() {
                   <td>{renderEditableCell(c, "fullName")}</td><td>{renderEditableCell(c, "title")}</td><td>{renderEditableCell(c, "orgName")}</td>
                   <td>{renderEditableCell(c, "email")}</td>
                   <td><span className={`badge ${lifecycleClass(c)}`}>{lifecycleLabel(c)}</span></td>
-                  <td>
-                    <div className="actions-inline table-actions">
-                      <button onClick={() => approve(c.id)}>Approve</button>
-                      <button className="danger-btn" onClick={() => reject(c.id)}>Reject</button>
-                    </div>
-                  </td>
+                    <td>
+                      <div className="actions-inline table-actions">
+                        {c.status !== "approved" && (
+                          <button type="button" className="btn-approve" onClick={() => approve(c.id)}>✓ Approve</button>
+                        )}
+                        {c.status !== "rejected" && (
+                          <button type="button" className="btn-reject" onClick={() => reject(c.id)}>✕ Reject</button>
+                        )}
+                      </div>
+                    </td>
                 </tr>
               ))}
             </tbody>
@@ -885,7 +939,14 @@ export default function ProspectsPage() {
                     <td>{renderEditableCell(c, "email")}</td>
                     <td><span className={`badge ${lifecycleClass(c)}`}>{lifecycleLabel(c)}</span></td>
                     <td>
-                      <button onClick={() => approve(c.id)}>Move to Approved</button>
+                      <div className="actions-inline table-actions">
+                        {c.status !== "approved" && (
+                          <button type="button" className="btn-approve" onClick={() => approve(c.id)}>✓ Approve</button>
+                        )}
+                        {c.status !== "rejected" && (
+                          <button type="button" className="btn-reject" onClick={() => reject(c.id)}>✕ Reject</button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -894,6 +955,12 @@ export default function ProspectsPage() {
           </div>
         ) : null}
       </section>
+
+      {toast && (
+        <div className={`toast-pill toast-${toast.type}`}>
+          <span>{toast.msg}</span>
+        </div>
+      )}
     </AppShell>
   );
 }
