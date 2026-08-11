@@ -27,7 +27,6 @@ export default function ProspectsPage() {
   const [busy, setBusy] = useState("");
   const [uiError, setUiError] = useState("");
   const [uiNotice, setUiNotice] = useState("");
-  const [lastRunDebug, setLastRunDebug] = useState<Record<string, unknown> | null>(null);
   const [progressPct, setProgressPct] = useState(0);
   const [previewContact, setPreviewContact] = useState<Contact | null>(null);
   const [previewData, setPreviewData] = useState<{ url: string; pageTitle: string; snippet: string; loading: boolean } | null>(null);
