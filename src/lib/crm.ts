@@ -16,8 +16,9 @@ import {
 let contactsCache: ContactRow[] | null = null;
 let organizationsCache: OrganizationRow[] | null = null;
 let crmBatchMode = false;
-let contactsDirty = false;
-let organizationsDirty = false;
+const dirtyContacts = new Map<string, ContactRow>();
+const dirtyOrganizations = new Map<string, OrganizationRow>();
+
 function normalizeOrgKey(value: string) {
   return (value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
@@ -36,16 +37,18 @@ async function getOrganizationsCached() {
 
 export function beginCrmBatch() {
   crmBatchMode = true;
+  dirtyContacts.clear();
+  dirtyOrganizations.clear();
 }
 
 export async function flushCrmBatch() {
-  if (organizationsDirty && organizationsCache) {
-    await saveOrganizations(organizationsCache);
-    organizationsDirty = false;
+  if (dirtyOrganizations.size > 0) {
+    await saveOrganizations(Array.from(dirtyOrganizations.values()));
+    dirtyOrganizations.clear();
   }
-  if (contactsDirty && contactsCache) {
-    await saveContacts(contactsCache);
-    contactsDirty = false;
+  if (dirtyContacts.size > 0) {
+    await saveContacts(Array.from(dirtyContacts.values()));
+    dirtyContacts.clear();
   }
   crmBatchMode = false;
 }
@@ -67,6 +70,7 @@ export async function upsertOrganization(input: Partial<OrganizationRow>) {
   });
   const ts = nowIso();
   if (existing) {
+    let modified = false;
     const nextName = (input.name ?? "").trim();
     const currentName = (existing.name ?? "").trim();
     const weakCurrent =
@@ -76,27 +80,24 @@ export async function upsertOrganization(input: Partial<OrganizationRow>) {
       /^[\w.-]+\.[a-z]{2,}$/i.test(currentName);
     if (nextName && weakCurrent && nextName.toLowerCase() !== currentName.toLowerCase()) {
       existing.name = nextName;
-      existing.updatedAt = ts;
-      if (crmBatchMode) {
-        organizationsDirty = true;
-      } else {
-        await saveOrganizations(orgs);
-      }
-      organizationsCache = orgs;
+      modified = true;
     }
 
-    if (typeof input.address === "string" && input.address.trim()) existing.address = input.address.trim();
-    if (typeof input.zip === "string" && input.zip.trim()) existing.zip = input.zip.trim();
-    if (typeof input.county === "string" && input.county.trim()) existing.county = input.county.trim();
-    if (typeof input.phone === "string" && input.phone.trim()) existing.phone = input.phone.trim();
-    if (typeof input.grades === "string" && input.grades.trim()) existing.grades = input.grades.trim();
-    if (typeof input.city === "string" && input.city.trim()) existing.city = input.city.trim();
-    if (typeof input.state === "string" && input.state.trim()) existing.state = input.state.trim();
-    existing.updatedAt = ts;
-    if (crmBatchMode) {
-      organizationsDirty = true;
-    } else {
-      await saveOrganizations(orgs);
+    if (typeof input.address === "string" && input.address.trim()) { existing.address = input.address.trim(); modified = true; }
+    if (typeof input.zip === "string" && input.zip.trim()) { existing.zip = input.zip.trim(); modified = true; }
+    if (typeof input.county === "string" && input.county.trim()) { existing.county = input.county.trim(); modified = true; }
+    if (typeof input.phone === "string" && input.phone.trim()) { existing.phone = input.phone.trim(); modified = true; }
+    if (typeof input.grades === "string" && input.grades.trim()) { existing.grades = input.grades.trim(); modified = true; }
+    if (typeof input.city === "string" && input.city.trim()) { existing.city = input.city.trim(); modified = true; }
+    if (typeof input.state === "string" && input.state.trim()) { existing.state = input.state.trim(); modified = true; }
+
+    if (modified) {
+      existing.updatedAt = ts;
+      if (crmBatchMode) {
+        dirtyOrganizations.set(existing.id, existing);
+      } else {
+        await saveOrganizations([existing]);
+      }
     }
     organizationsCache = orgs;
     return existing;
@@ -121,9 +122,9 @@ export async function upsertOrganization(input: Partial<OrganizationRow>) {
   };
   orgs.push(row);
   if (crmBatchMode) {
-    organizationsDirty = true;
+    dirtyOrganizations.set(row.id, row);
   } else {
-    await saveOrganizations(orgs);
+    await saveOrganizations([row]);
   }
   organizationsCache = orgs;
   return row;
@@ -139,9 +140,9 @@ export async function upsertContact(input: Partial<ContactRow>) {
     existing.updatedAt = ts;
     if (typeof input.orgName === "string" && input.orgName.trim()) existing.orgName = input.orgName.trim();
     if (crmBatchMode) {
-      contactsDirty = true;
+      dirtyContacts.set(existing.id, existing);
     } else {
-      await saveContacts(contacts);
+      await saveContacts([existing]);
     }
     contactsCache = contacts;
     return existing;
@@ -165,9 +166,9 @@ export async function upsertContact(input: Partial<ContactRow>) {
   };
   contacts.push(row);
   if (crmBatchMode) {
-    contactsDirty = true;
+    dirtyContacts.set(row.id, row);
   } else {
-    await saveContacts(contacts);
+    await saveContacts([row]);
   }
   contactsCache = contacts;
   return row;

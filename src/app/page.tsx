@@ -500,6 +500,31 @@ export default function ProspectsPage() {
   }
 
 
+  function exportApprovedCsv() {
+    const approved = contacts.filter((c) => c.status === "approved");
+    if (!approved.length) {
+      setUiError("No approved contacts to export.");
+      return;
+    }
+    const headers = ["Full Name", "Title", "Organization", "Email", "Source URL"];
+    const rows = approved.map((c) => [
+      `"${(c.fullName || "").replace(/"/g, '""')}"`,
+      `"${(c.title || "").replace(/"/g, '""')}"`,
+      `"${(c.orgName || "").replace(/"/g, '""')}"`,
+      `"${(c.email || "").replace(/"/g, '""')}"`,
+      `"${(c.sourceUrl || "").replace(/"/g, '""')}"`,
+    ]);
+    const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `approved_librarians_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
   return (
     <AppShell title="AuthorBridge Librarian CRM" subtitle="Prospecting queue and review workflow.">
       {uiError ? <div className="error-banner">{uiError}</div> : null}
@@ -518,6 +543,9 @@ export default function ProspectsPage() {
               onClick={preloadSchools}
             >
               {busy === "preload-schools" ? "Preloading..." : "Preload Schools"}
+            </button>
+            <button type="button" className="secondary-btn" onClick={exportApprovedCsv}>
+              Export Approved (CSV)
             </button>
             <button type="button" className="secondary-btn" onClick={() => setProspectorOpen((v) => !v)}>
               {prospectorOpen ? "Collapse" : "Expand"}

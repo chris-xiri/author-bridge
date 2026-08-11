@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { extractContactsWithAi, inferOrganizationNameWithAi } from "@/lib/ai-extractor";
 import { beginCrmBatch, flushCrmBatch, upsertContact, upsertOrganization } from "@/lib/crm";
-import { fetchPage, searchSerpApi } from "@/lib/prospect";
+import { fetchPage, findStaffLikeLinks, searchSerpApi } from "@/lib/prospect";
 import { createId, nowIso } from "@/lib/utils";
 import { ensureSheetSchema, listContacts } from "@/lib/sheets";
 
@@ -65,11 +65,12 @@ export async function POST(req: Request) {
       const queryPlan: { geo: string; kw: string; type: "public" | "school" }[] = [];
 
       for (const geo of input.geoTargets) {
+        const geoClean = geo.replace(/,/g, " ").replace(/\s+/g, " ").trim();
         if (input.prospectPublicLibraries) {
-          queryPlan.push({ geo, kw: `"${geo}" "Public Library" staff directory OR librarian`, type: "public" });
+          queryPlan.push({ geo, kw: `${geoClean} public library staff directory librarian`, type: "public" });
         }
         if (input.prospectSchoolLibraries) {
-          queryPlan.push({ geo, kw: `"${geo}" school district "library media specialist" OR "librarian" directory`, type: "school" });
+          queryPlan.push({ geo, kw: `${geoClean} school district library media specialist librarian directory`, type: "school" });
         }
       }
 
@@ -92,11 +93,11 @@ export async function POST(req: Request) {
         await Promise.allSettled(candidates.map(async (item) => {
           if (!item.link) return;
           try {
-            const html = await fetchPage(item.link);
-            const h1 = extractH1Title(html);
+            const mainHtml = await fetchPage(item.link);
+            const h1 = extractH1Title(mainHtml);
             let orgName = sanitizeOrgName(h1 || item.title || "");
             
-            const aiOrg = await inferOrganizationNameWithAi({ html, pageUrl: item.link, pageTitle: item.title ?? "" });
+            const aiOrg = await inferOrganizationNameWithAi({ html: mainHtml, pageUrl: item.link, pageTitle: item.title ?? "" });
             if (aiOrg) orgName = sanitizeOrgName(aiOrg);
 
             const org = await upsertOrganization({
@@ -107,36 +108,52 @@ export async function POST(req: Request) {
               libraryType: step.type,
             });
 
-            const extracted = await extractContactsWithAi({
-              html,
-              pageUrl: item.link,
-              pageTitle: item.title ?? "",
-            });
+            // Prepare pages to inspect: main page + staff sub-links
+            const pagesToProcess = [{ url: item.link, html: mainHtml }];
+            const subLinks = findStaffLikeLinks(mainHtml, item.link).slice(0, 2);
+            for (const subUrl of subLinks) {
+              if (subUrl !== item.link) {
+                try {
+                  const subHtml = await fetchPage(subUrl);
+                  pagesToProcess.push({ url: subUrl, html: subHtml });
+                } catch {
+                  // ignore sub-page fetch errors
+                }
+              }
+            }
 
-            for (const found of extracted) {
-              const normalizedEmail = (found.email ?? "").toLowerCase();
-              if (!normalizedEmail || knownEmails.has(normalizedEmail)) continue;
-
-              const row = await upsertContact({
-                orgId: org.id,
-                orgName: org.name,
-                fullName: found.fullName,
-                title: found.title,
-                email: found.email,
-                phone: found.phone,
-                sourceQuery: step.kw,
-                sourceUrl: item.link,
+            for (const targetPage of pagesToProcess) {
+              const extracted = await extractContactsWithAi({
+                html: targetPage.html,
+                pageUrl: targetPage.url,
+                pageTitle: item.title ?? "",
               });
 
-              if (row) {
-                knownEmails.add(normalizedEmail);
-                discoveredCount++;
-                queuedForReviewCount++;
-                
-                await sendEvent("progress", { 
-                  message: `Discovered ${row.email} at ${org.name}`,
-                  pct: Math.floor(10 + ((i / queryPlan.length) * 90))
+              for (const found of extracted) {
+                const normalizedEmail = (found.email ?? "").toLowerCase();
+                if (!normalizedEmail || knownEmails.has(normalizedEmail)) continue;
+
+                const row = await upsertContact({
+                  orgId: org.id,
+                  orgName: org.name,
+                  fullName: found.fullName,
+                  title: found.title,
+                  email: found.email,
+                  phone: found.phone,
+                  sourceQuery: step.kw,
+                  sourceUrl: targetPage.url,
                 });
+
+                if (row) {
+                  knownEmails.add(normalizedEmail);
+                  discoveredCount++;
+                  queuedForReviewCount++;
+                  
+                  await sendEvent("progress", { 
+                    message: `Discovered ${row.fullName} (${row.email}) at ${org.name}`,
+                    pct: Math.floor(10 + ((i / queryPlan.length) * 90))
+                  });
+                }
               }
             }
           } catch (err) {

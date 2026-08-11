@@ -123,14 +123,17 @@ export async function extractContactsWithAi(args: {
   pageTitle: string;
 }) {
   const env = getEnv();
-  const text = args.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 18000);
+  const text = args.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 45000);
 
   const prompt = [
-    "Extract school or public library staff contacts from this page.",
-    "Return ONLY library directors, librarians, or library media specialists, not principals/deans/superintendents/custodians.",
-    "Title must be verbatim from the page near that person. Do not invent or normalize titles.",
-    "If no explicit title is shown for a person, use an empty string for title.",
-    "JSON output only with key contacts: [{fullName,title,email,phone}]",
+    "Extract library and school staff contacts from this page text.",
+    "Target personas: Library Media Specialist, School Librarian, Public Librarian, Library Director, Youth Services Librarian, Media Center Coordinator, Library Assistant, or Instructional Technology Specialist.",
+    "Do NOT extract generic organization emails (e.g. info@, contact@, support@, admin@) or non-person names (e.g. 'Staff', 'Contact Us', 'Library Team').",
+    "Requirements for each contact:",
+    "1. fullName MUST be an actual person's first and last name.",
+    "2. email MUST be a valid person email address.",
+    "3. title should be verbatim or their role on the page.",
+    "Return JSON only: {\"contacts\": [{\"fullName\":\"...\", \"title\":\"...\", \"email\":\"...\", \"phone\":\"...\"}]}",
     `URL: ${args.pageUrl}`,
     `Title: ${args.pageTitle}`,
     `Content: ${text}`,
@@ -212,7 +215,18 @@ export async function extractContactsWithAi(args: {
   if (!outputText) return [] as AiExtractedContact[];
   try {
     const parsed = JSON.parse(outputText) as { contacts?: AiExtractedContact[] };
-    return parsed.contacts ?? [];
+    const rawList = parsed.contacts ?? [];
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const genericNameRegex = /^(staff|contact\s*us|email\s*us|library|help\s*desk|admin|info|directory|general\s*inquiries)$/i;
+
+    return rawList.filter((c) => {
+      const name = (c.fullName || "").trim();
+      const email = (c.email || "").trim().toLowerCase();
+      if (!name || name.length < 3 || genericNameRegex.test(name)) return false;
+      if (!email || !emailRegex.test(email)) return false;
+      return true;
+    });
   } catch {
     return [] as AiExtractedContact[];
   }
