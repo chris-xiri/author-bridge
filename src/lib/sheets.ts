@@ -14,7 +14,7 @@ export async function ensureSheetSchema() {
 
 async function readCollection<T>(collectionName: string): Promise<T[]> {
   const snapshot = await db.collection(collectionName).get();
-  return snapshot.docs.map((doc) => doc.data() as T);
+  return (snapshot?.docs ?? []).map((doc: any) => doc.data() as T);
 }
 
 async function writeCollection(collectionName: string, rows: any[]) {

@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 

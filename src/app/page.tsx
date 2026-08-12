@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import { FormEvent, useEffect, useState } from "react";
 import { ALL_STATES, GEO_DATA, ResolvedGeoQuery } from "@/lib/geo-data";
 import { AppShell } from "@/components/app-shell";
