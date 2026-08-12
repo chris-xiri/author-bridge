@@ -28,7 +28,7 @@ const requiredString = (min: number) => asCleanString.pipe(z.string().min(min));
 const requiredUrl = asCleanString.pipe(z.string().url());
 const optionalMinString = (min: number) => asOptionalCleanString.pipe(z.string().min(min).optional());
 
-const schema = z.object({
+export const schema = z.object({
   ADMIN_EMAIL: requiredEmail,
   ADMIN_PASSWORD_HASH: requiredString(20),
   GOOGLE_SERVICE_ACCOUNT_EMAIL: requiredEmail,
@@ -84,13 +84,14 @@ export function getEnv() {
   if (cached) return cached;
   const parsed = schema.safeParse(process.env);
   if (!parsed.success) {
-    // If environment variables are not set during Vercel static build or prerendering phase, return build fallbacks
-    if (
-      process.env.NEXT_PHASE ||
-      process.env.VERCEL ||
-      process.env.CI ||
-      !process.env.FIREBASE_PROJECT_ID
-    ) {
+    const isBuildPhase = process.env.NEXT_PHASE === "phase-production-build";
+    const hasRealFirebase = Boolean(
+      process.env.FIREBASE_PROJECT_ID &&
+      process.env.FIREBASE_PRIVATE_KEY?.includes("BEGIN PRIVATE KEY")
+    );
+
+    // Only use dummy fallbacks during static production build if real env vars aren't present yet
+    if (isBuildPhase && !hasRealFirebase) {
       return {
         ADMIN_EMAIL: process.env.ADMIN_EMAIL || "admin@authorbridge.com",
         ADMIN_PASSWORD_HASH: process.env.ADMIN_PASSWORD_HASH || "$2a$10$abcdefghijklmnopqrstuvwxyz012345",
@@ -112,6 +113,7 @@ export function getEnv() {
         FIREBASE_PRIVATE_KEY: process.env.FIREBASE_PRIVATE_KEY || "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC3\n-----END PRIVATE KEY-----",
       } as z.infer<typeof schema>;
     }
+
     const message = parsed.error.issues
       .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
       .join("; ");

@@ -4,6 +4,17 @@ import { getEnv } from './env';
 
 let _db: Firestore | null = null;
 
+function cleanPrivateKey(rawKey: string) {
+  let key = (rawKey || "").trim();
+  if (
+    (key.startsWith('"') && key.endsWith('"')) ||
+    (key.startsWith("'") && key.endsWith("'"))
+  ) {
+    key = key.slice(1, -1).trim();
+  }
+  return key.replace(/\\n/g, "\n");
+}
+
 export function getDb(): Firestore {
   if (_db) return _db;
 
@@ -14,8 +25,7 @@ export function getDb(): Firestore {
 
   try {
     const env = getEnv();
-    const rawKey = env.FIREBASE_PRIVATE_KEY || "";
-    const privateKey = rawKey.replace(/\\n/g, '\n').replace(/^"|"$/g, '').trim();
+    const privateKey = cleanPrivateKey(env.FIREBASE_PRIVATE_KEY || "");
 
     const app = initializeApp({
       credential: cert({
@@ -29,7 +39,7 @@ export function getDb(): Firestore {
   } catch (err) {
     console.error("Firebase Admin initialization error:", err);
     
-    // Graceful fallback object to prevent runtime crashes if credentials are missing
+    // Graceful fallback object if credentials are dummy or missing
     const mockDoc = {
       id: "mock_id",
       set: async () => {},
