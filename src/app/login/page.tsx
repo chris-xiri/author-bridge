@@ -19,7 +19,7 @@ export default function LoginPage() {
     });
     setLoading(false);
     if (!res.ok) {
-      setError("Invalid credentials.");
+      setError("Invalid email or password. Please check your credentials.");
       return;
     }
     window.location.href = "/";
@@ -29,24 +29,38 @@ export default function LoginPage() {
     <main className="login-shell">
       <div className="login-card">
         <div className="login-brand">
-          <span className="login-logo">AUTHORBRIDGE</span>
-          <span className="login-sub">INTERNAL CRM</span>
+          <div className="login-brand-icon">🌉</div>
+          <span className="login-logo">AuthorBridge</span>
+          <span className="login-sub">CRM</span>
         </div>
         <p className="login-desc">Sign in to access librarian prospecting and outreach.</p>
         <form onSubmit={submit} className="login-form">
-          <label>Email</label>
-          <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required />
-          <label>Password</label>
-          <input
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            type="password"
-            required
-          />
-          <button type="submit" disabled={loading}>
-            {loading ? "Signing in..." : "Sign in"}
+          <div className="login-field">
+            <label htmlFor="email">Work Email</label>
+            <input
+              id="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              type="email"
+              placeholder="admin@authorbridge.com"
+              required
+            />
+          </div>
+          <div className="login-field">
+            <label htmlFor="password">Password</label>
+            <input
+              id="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              type="password"
+              placeholder="••••••••••••"
+              required
+            />
+          </div>
+          <button type="submit" className="login-btn" disabled={loading}>
+            {loading ? "Signing in..." : "Sign in to Dashboard →"}
           </button>
-          {error ? <p className="error">{error}</p> : null}
+          {error ? <div className="login-error">{error}</div> : null}
         </form>
       </div>
     </main>
