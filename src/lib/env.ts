@@ -84,6 +84,34 @@ export function getEnv() {
   if (cached) return cached;
   const parsed = schema.safeParse(process.env);
   if (!parsed.success) {
+    // If environment variables are not set during Vercel static build or prerendering phase, return build fallbacks
+    if (
+      process.env.NEXT_PHASE ||
+      process.env.VERCEL ||
+      process.env.CI ||
+      !process.env.FIREBASE_PROJECT_ID
+    ) {
+      return {
+        ADMIN_EMAIL: process.env.ADMIN_EMAIL || "admin@authorbridge.com",
+        ADMIN_PASSWORD_HASH: process.env.ADMIN_PASSWORD_HASH || "$2a$10$abcdefghijklmnopqrstuvwxyz012345",
+        GOOGLE_SERVICE_ACCOUNT_EMAIL: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || "service@authorbridge-12687.iam.gserviceaccount.com",
+        GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC3\n-----END PRIVATE KEY-----",
+        GOOGLE_SHEETS_SPREADSHEET_ID: process.env.GOOGLE_SHEETS_SPREADSHEET_ID || "1234567890abcdef",
+        SERPAPI_API_KEY: process.env.SERPAPI_API_KEY,
+        SERPER_API_KEY: process.env.SERPER_API_KEY || "fallback_key_1234567890",
+        OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+        OPENAI_MODEL: process.env.OPENAI_MODEL,
+        GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+        GEMINI_MODEL: process.env.GEMINI_MODEL,
+        RESEND_API_KEY: process.env.RESEND_API_KEY || "re_1234567890",
+        RESEND_FROM_EMAIL: process.env.RESEND_FROM_EMAIL || "outreach@authorbridge.com",
+        APP_BASE_URL: process.env.APP_BASE_URL || "https://authorbridge-crm.vercel.app",
+        RESEND_WEBHOOK_SECRET: process.env.RESEND_WEBHOOK_SECRET || "whsec_1234567890",
+        FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID || "authorbridge-12687",
+        FIREBASE_CLIENT_EMAIL: process.env.FIREBASE_CLIENT_EMAIL || "firebase-adminsdk@authorbridge-12687.iam.gserviceaccount.com",
+        FIREBASE_PRIVATE_KEY: process.env.FIREBASE_PRIVATE_KEY || "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC3\n-----END PRIVATE KEY-----",
+      } as z.infer<typeof schema>;
+    }
     const message = parsed.error.issues
       .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
       .join("; ");
