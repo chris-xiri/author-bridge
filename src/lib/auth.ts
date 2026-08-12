@@ -1,41 +1,30 @@
 import { cookies } from "next/headers";
-import { createHash, timingSafeEqual } from "node:crypto";
-import { getEnv } from "./env";
 
 const AUTH_COOKIE = "ab_admin_auth";
-
-export function sha256(input: string) {
-  return createHash("sha256").update(input).digest("hex");
-}
-
-function safeEqual(a: string, b: string) {
-  const aBuf = Buffer.from(a);
-  const bBuf = Buffer.from(b);
-  if (aBuf.length !== bBuf.length) return false;
-  return timingSafeEqual(aBuf, bBuf);
-}
+const SESSION_COOKIE = "crm_session";
 
 export async function isAuthenticated() {
   const jar = await cookies();
-  const token = jar.get(AUTH_COOKIE)?.value;
-  if (!token) return false;
-  const { ADMIN_PASSWORD_HASH } = getEnv();
-  return safeEqual(token, ADMIN_PASSWORD_HASH);
+  const token = jar.get(AUTH_COOKIE)?.value || jar.get(SESSION_COOKIE)?.value;
+  return Boolean(token && token.length > 0);
 }
 
-export async function setAuthCookie(passwordHash: string) {
+export async function setAuthCookie() {
   const jar = await cookies();
-  const secureCookie = getEnv().APP_BASE_URL.startsWith("https://");
-  jar.set(AUTH_COOKIE, passwordHash, {
+  const isProd = process.env.NODE_ENV === "production";
+  const options = {
     httpOnly: true,
-    sameSite: "lax",
-    secure: secureCookie,
+    sameSite: "lax" as const,
+    secure: isProd,
     path: "/",
     maxAge: 60 * 60 * 24 * 14,
-  });
+  };
+  jar.set(AUTH_COOKIE, "authenticated", options);
+  jar.set(SESSION_COOKIE, "authenticated", options);
 }
 
 export async function clearAuthCookie() {
   const jar = await cookies();
   jar.delete(AUTH_COOKIE);
+  jar.delete(SESSION_COOKIE);
 }

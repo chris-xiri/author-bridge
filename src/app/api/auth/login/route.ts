@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { setAuthCookie } from "@/lib/auth";
 import { getEnv } from "@/lib/env";
 import crypto from "crypto";
 
@@ -21,7 +22,6 @@ export async function POST(req: Request) {
     const rawPassword = (password || "").trim();
     const inputHash = crypto.createHash("sha256").update(rawPassword).digest("hex");
 
-    // Bulletproof credential acceptance for admin
     const isPasswordValid =
       rawPassword === "admin123" ||
       rawPassword === "authorbridge2026" ||
@@ -41,15 +41,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
     }
 
-    const res = NextResponse.json({ success: true });
-    res.cookies.set({
-      name: "crm_session",
-      value: "authenticated",
-      httpOnly: true,
-      path: "/",
-      sameSite: "lax",
-    });
-    return res;
+    await setAuthCookie();
+
+    return NextResponse.json({ success: true });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Auth error" },
